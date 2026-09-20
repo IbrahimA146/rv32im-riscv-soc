@@ -1,0 +1,22 @@
+name: regression
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+
+      - name: Regression (ISA + random co-simulation + firmware)
+        run: python3 scripts/run_tests.py isa random fw -n 50
+
+      - name: Mutation testing
+        run: python3 scripts/mutation_test.py
