@@ -1,90 +1,118 @@
 # Plan: DOOM on this CPU
 
-**Goal:** open a web page, play DOOM, and watch the processor from this repository execute it live.
+**Goal:** DOOM running on the processor in this repository — the actual RTL, not an imitation of it — captured
+as a video with honest performance numbers.
 
-Six stages. Each one ends with something you can see, and nothing moves on until its "done when" check passes
-and the existing regression is still green.
+Each stage ends with something visible, and nothing moves on until its "done when" check passes and the
+existing regression is still green.
 
 | # | Stage | You can see | State |
 |---|---|---|---|
-| 0 | Setup | this plan, tidy repo | done |
+| 0 | Groundwork | measured simulator speed, this plan | done |
 | 1 | Screen, keys, memory | a test pattern drawn by the chip | next |
-| 2 | Fast model | the firmware booting instantly | |
-| 3 | DOOM port | the title screen as an image | |
-| 4 | Browser | DOOM playable in a tab | |
-| 5 | Live CPU panel | the pipeline working next to the game | |
-| 6 | Proof and polish | real-hardware frames matching the model | |
+| 2 | Fast harness | the whole regression in seconds | |
+| 3 | C library | malloc/printf/qsort working on the chip | |
+| 4 | DOOM port | the title screen, rendered by the pipeline | |
+| 5 | Video | DOOM running, as an mp4 in the README | |
+| 6 | Browser (stretch) | DOOM playable in a tab, live CPU panel | |
+
+---
+
+## What stands in the way
+
+Four concrete problems, with measurements rather than guesses.
+
+| Problem | Today | DOOM needs |
+|---|---|---|
+| Memory | 64 KiB | ~8 MiB |
+| Output | text over a serial port | a 320×200 framebuffer |
+| Input | none | keyboard events |
+| Speed | see below | ~3–5 M instructions per frame |
+
+**Speed, measured on 2026-10-01** (same testbench, same firmware image, identical instruction counts):
+
+| Simulator | Rate | Relative |
+|---|---:|---:|
+| Icarus Verilog (`vvp`) | ~10 k cycles/s | 1× |
+| Verilator 5.024, `--binary --timing`, `-O3 -CFLAGS -O2` | **1.63 M cycles/s** | **~170×** |
+| Verilator + dedicated C++ harness (stage 2 target) | ≥ 5 M cycles/s | ≥ 500× |
+
+At 5 M cycles/s and ~4 M instructions per frame, expect **roughly 1 frame per second**. DOOM at 35 fps is not
+the goal and will not be claimed; a recorded video with the real numbers printed next to it is.
+
+### Why Verilator and not a hand-written C emulator
+
+Verilator compiles *this repository's RTL* into fast C++. A hand-written emulator would be a second CPU
+implementation to build, debug and keep in sync, and DOOM running on it would prove nothing about the
+hardware design. The Verilator route keeps the claim literally true: the pipeline, the forwarding logic, the
+branch predictor and the divider are all executing DOOM.
 
 ---
 
 ## Stage 1 — Screen, keys, memory
 
-The chip has 64 KiB of memory and can only print text. DOOM needs megabytes, a screen and a keyboard.
+* **Build:** make RAM size a parameter (64 KiB for tests, 16 MiB for DOOM). Two new devices in `rtl/soc/`:
+  a framebuffer (320×200, 8-bit palette + 256-entry palette RAM) and a key-event FIFO with an interrupt.
+  Both added to the Python reference model so co-simulation still works.
+* **Done when:** a small firmware app draws a test pattern, the testbench writes it out as a PNG, new device
+  tests pass in co-simulation, and the full regression plus the 26/26 mutation score are unchanged.
 
-* **Build:** RAM size becomes a parameter (64 KiB for the tests, 16 MiB for DOOM). Two new devices in
-  `rtl/soc/`: a 320×200 framebuffer and a key-event register. Both mirrored in the Python reference model.
-* **Done when:** a small firmware app draws a test pattern, the testbench saves it as an image, new device
-  tests pass in co-simulation, and the full regression plus mutation score are unchanged.
+## Stage 2 — Fast harness
 
-## Stage 2 — Fast model
+The coroutine-based testbench costs speed. DOOM needs a purpose-built harness.
 
-The full regression gets through about half a million instructions in a minute and a half. DOOM needs tens
-of millions per second.
+* **Build:** `sim/verilator/main.cpp` — drives the clock directly, loads the memory image, serves the
+  framebuffer and keyboard, writes frames to disk. Verilator becomes a second signoff simulator in
+  `run_tests.py` (`--sim=verilator`).
+* **Done when:** every regression test produces a commit trace identical to Icarus and to the ISS, the suite
+  runs in seconds instead of minutes, and the harness sustains ≥ 5 M cycles/s. Also resolve the known
+  1-cycle difference in the testbench's own cycle counter between the two simulators (counting artifact, not
+  a design difference — but it must be explained, not ignored).
 
-* **Build:** `model/` — the CPU and its devices re-implemented in C, executing the same instructions the
-  hardware does, one at a time.
-* **Done when:** every regression test produces the same commit trace on the C model as on the Python
-  reference (and therefore the hardware), and it runs at 30 million instructions per second or better.
+## Stage 3 — C library
 
-## Stage 3 — DOOM port
+DOOM's source expects `malloc`, `fopen`/`fread`, `sprintf`, `qsort`, `atoi`. The firmware's hand-written
+library has none of them.
 
-* **Build:** `fw/apps/doom/` — the open-source DOOM engine compiled for this CPU with no operating system
-  underneath. Four small hooks connect it to the chip: draw a frame, read keys, read the clock, wait. The game
-  data is packed into the firmware image because there is no disk.
-* **Done when:** the fast model writes out the title screen and a frame of the first level, and a recorded
-  demo replays to the same checksum every run.
+* **Build:** a RISC-V toolchain with a real C library (newlib), unpacked inside the repo. Retarget its system
+  calls onto the SoC: `write` → UART, `exit` → SYSCON, plus a heap in RAM. The WAD is linked in as a
+  read-only blob behind a tiny in-memory file shim, so no block device is needed.
+* **Done when:** a test app that mallocs, sprintfs, qsorts and reads the embedded WAD header runs correctly
+  on the chip, and the regression still passes with the new toolchain.
 
-## Stage 4 — Browser
+## Stage 4 — DOOM port
 
-* **Build:** `web/` — the C model compiled to WebAssembly, plus a page with a canvas and keyboard input.
-* **Done when:** the game is playable in Chrome at 20 frames per second or better from a hosted link.
+`doomgeneric` exists precisely for this: it reduces DOOM to five functions a platform must provide.
 
-## Stage 5 — Live CPU panel
+* **Build:** `fw/apps/doom/` — implement `DG_Init`, `DG_DrawFrame` (copy to framebuffer), `DG_SleepMs`,
+  `DG_GetTicksMs` (from `mtime`), `DG_GetKey` (from the key FIFO). Freedoom supplies the game data.
+* **Done when:** the title screen, rendered by the RTL, is saved as a PNG that looks like DOOM.
 
-* **Build:** a timing layer on the model that reproduces what the pipeline does each cycle: branch
-  predictions, load-use stalls, divide stalls, flushes. A panel beside the game shows the five stages, cycles
-  per instruction, and branch-prediction accuracy.
-* **Done when:** on the benchmark firmware, the model's cycle and misprediction counts equal the numbers the
-  hardware's own counters report.
+## Stage 5 — Video
 
-## Stage 6 — Proof and polish
+* **Build:** run DOOM's built-in demo playback — deterministic, needs no keyboard — dump every frame, and
+  assemble them with ffmpeg. Print measured cycles/frame, instructions/frame, CPI and branch-prediction
+  accuracy from the hardware counters alongside.
+* **Done when:** the README shows a video of DOOM running on the CPU, labelled with its real frame rate and
+  how much faster than real time the playback is.
 
-* **Build:** a run of the real hardware design (compiled with Verilator) from boot through the first frames,
-  a slow-motion mode that shows those frames, and a 60-second demo script.
-* **Done when:** frames from the real design are pixel-identical to the model's, with matching commit traces.
+## Stage 6 — Browser (stretch, only after stage 5)
+
+Compile the Verilator model to WebAssembly with emscripten, add a canvas, keyboard input, and a panel showing
+pipeline activity and counters live. Attempt only once the video exists.
 
 ---
 
-## What we can honestly claim
+## What can honestly be claimed
 
-The playable version runs on a **model of the CPU that is checked instruction-for-instruction against the
-hardware design**, not on the hardware design itself, which is far too slow to simulate in real time. Stage 6
-closes the gap by running the true design for a short stretch and showing identical output.
+* "DOOM runs on a RISC-V CPU I designed from scratch, in RTL simulation, at ~N fps."
+* "The same RTL is verified against a golden reference model instruction by instruction, and the test suite
+  catches 26/26 injected bugs."
 
-## Tools
+Not claimable without an FPGA: that it runs on real hardware. Keep that distinction explicit everywhere.
 
-| Tool | Used for | Have it? |
-|---|---|---|
-| Icarus Verilog 12 | hardware simulation | yes |
-| RISC-V GCC 12.2 + newlib | compiling firmware and DOOM | yes |
-| GCC 13 (native), make, Python 3.13 | building the model, scripts | yes |
-| clang + lld | WebAssembly build (stage 4) | **no** |
-| Verilator | fast run of the real design (stage 6) | **no** |
+## Tools and downloads
 
-## Open decisions
-
-* **Game data.** The shareware `DOOM1.WAD` (about 4 MB) is free to download but not ours to redistribute, so
-  it stays out of the repository and is fetched by a script. Freedoom is the fully open alternative.
-* **Licence.** The DOOM engine source is GPL-2.0. Either it is fetched at build time like the game data, or
-  `fw/apps/doom/` carries that licence. Decide at stage 3.
-* **Sound.** Left out. It is a stretch goal after stage 6.
+Installed system-wide: Icarus Verilog, Verilator, RISC-V GCC, Python (all free).
+Inside the repo and deletable with it: the newlib toolchain, `doomgeneric` source (GPL), Freedoom game data
+(free and redistributable — the original commercial WAD is never required).

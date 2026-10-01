@@ -1,13 +1,14 @@
 # DOOM on a CPU I designed
 
 A RISC-V processor built from scratch, the small computer around it, and the firmware that runs on it,
-now being extended until it plays DOOM in a browser tab with the processor's pipeline visible live.
+now being extended until it plays DOOM — on the real RTL, in simulation, recorded as a video.
 
 ## Where it stands
 
 * **Working today:** the CPU, the system-on-chip, bare-metal firmware, and a verification flow that checks
   every instruction against a reference model.
-* **In progress:** the DOOM port. Stage 1 of 6 is next.
+* **In progress:** the DOOM port. Groundwork done (Verilator brought the simulator from ~10 k to 1.63 M
+  cycles/s, a 170x speedup on the same RTL); stage 1 is next.
 
 ## The pieces
 
@@ -25,13 +26,13 @@ now being extended until it plays DOOM in a browser tab with the processor's pip
 | # | Stage | You can see |
 |---|---|---|
 | 1 | Screen, keys, memory | a test pattern drawn by the chip |
-| 2 | Fast model | the firmware booting instantly |
-| 3 | DOOM port | the title screen as an image |
-| 4 | Browser | DOOM playable in a tab |
-| 5 | Live CPU panel | the pipeline working next to the game |
-| 6 | Proof and polish | real-hardware frames matching the model |
+| 2 | Fast harness | the whole regression in seconds |
+| 3 | C library | malloc/printf/qsort working on the chip |
+| 4 | DOOM port | the title screen, rendered by the pipeline |
+| 5 | Video | DOOM running, as an mp4 in the README |
+| 6 | Browser (stretch) | DOOM playable in a tab, live CPU panel |
 
-Details and the "done when" check for each stage are in [docs/plan.md](docs/plan.md).
+Details, measurements and the "done when" check for each stage are in [docs/plan.md](docs/plan.md).
 
 ## Run it
 
