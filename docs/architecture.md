@@ -8,7 +8,7 @@ How the CPU and the system-on-chip around it are built. For the test strategy se
 | | |
 |---|---|
 | **CPU** | RV32IM_Zicsr, 5-stage pipeline, full forwarding, load-use stalls, BTB + 2-bit bimodal predictor, iterative divider, precise exceptions & interrupts, vectored `mtvec`, 64-bit `mcycle`/`minstret`, branch/mispredict HPM counters |
-| **SoC** | 64 KiB RAM, SiFive-compatible CLINT, 8N1 UART with 16-deep FIFOs + IRQ, 32-bit GPIO, bus-error → precise access-fault |
+| **SoC** | RAM (64 KiB for tests, parameterised up to 16 MiB), SiFive-compatible CLINT, 8N1 UART with 16-deep FIFOs + IRQ, 32-bit GPIO, 320x200 indexed-colour framebuffer, keyboard event queue, bus-error → precise access-fault |
 | **Firmware** | Own `crt0`, linker script, trap vector with C dispatcher, IRQ-driven UART ring buffer, `printf`, timer driver, ecall "syscalls", illegal-instruction recovery, interactive shell |
 
 ## Pipeline
@@ -62,10 +62,13 @@ flowchart LR
     DEC --> CLINT[CLINT<br/>mtime / mtimecmp / msip]
     DEC --> UART[UART<br/>TX/RX FIFOs]
     DEC --> GPIO[GPIO]
+    DEC --> VID[VIDEO<br/>framebuffer + palette]
+    DEC --> KEY[KEYS<br/>event queue]
     DEC --> SYS[SYSCON<br/>exit]
     DEC -. unmapped .-> ERR[bus error → access fault]
     CLINT -- MTIP / MSIP --> CPU
     UART -- MEIP --> CPU
+    KEY -- MEIP --> CPU
 ```
 
 | Base | Device | Registers |
@@ -75,6 +78,10 @@ flowchart LR
 | `0x1000_0000` | UART | `TXDATA` `RXDATA` `STATUS` `CTRL` `BAUDDIV` |
 | `0x2000_0000` | GPIO | `OUT` `IN` `OE` |
 | `0x3000_0000` | SYSCON | `EXIT` (write ends simulation with a code) |
+| `0x4000_0000` | VIDEO pixels | 320x200 colour indices, one byte per pixel |
+| `0x4001_0000` | VIDEO palette | 256 x `0x00RRGGBB`, grayscale ramp on reset |
+| `0x4002_0000` | VIDEO control | `PRESENT` (write: frame done) `FRAME` `MODE` |
+| `0x5000_0000` | KEYS | `DATA` (read pops) `STATUS` `CTRL`, IRQ into MEIP |
 
 Implemented CSRs: `mstatus misa mie mtvec mscratch mepc mcause mtval mip mcycle[h] minstret[h]
 mhpmcounter3` (resolved branches), `mhpmcounter4` (mispredictions), `mvendorid marchid mimpid mhartid`.

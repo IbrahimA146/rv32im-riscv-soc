@@ -9,8 +9,8 @@ existing regression is still green.
 | # | Stage | You can see | State |
 |---|---|---|---|
 | 0 | Groundwork | measured simulator speed, this plan | done |
-| 1 | Screen, keys, memory | a test pattern drawn by the chip | next |
-| 2 | Fast harness | the whole regression in seconds | |
+| 1 | Screen, keys, memory | a test pattern drawn by the chip | done |
+| 2 | Fast harness | the whole regression in seconds | next |
 | 3 | C library | malloc/printf/qsort working on the chip | |
 | 4 | DOOM port | the title screen, rendered by the pipeline | |
 | 5 | Video | DOOM running, as an mp4 in the README | |
@@ -56,6 +56,13 @@ branch predictor and the divider are all executing DOOM.
   Both added to the Python reference model so co-simulation still works.
 * **Done when:** a small firmware app draws a test pattern, the testbench writes it out as a PNG, new device
   tests pass in co-simulation, and the full regression plus the 26/26 mutation score are unchanged.
+* **Done.** `soc_video.sv` (indexed framebuffer + palette) and `soc_keys.sv` (event queue with interrupt)
+  are in the SoC and in the Python reference model; `tests/isa/video.S` co-simulates every new register;
+  `fw/apps/testpat` draws [this pattern](images/testpat.png) in 1.67 M cycles (26 per pixel) and self-checks
+  the read-back; the testbench captures frames as PPM and `scripts/ppm2png.py` converts them. RAM is a
+  parameter and a 16 MiB build runs. Two bugs found and fixed on the way: named palette entries overlapped
+  the grayscale ramp (stray colour in the gradient), and the testbench drove key events on the same clock
+  edge the FIFO sampled them (events arrived as code 0).
 
 ## Stage 2 — Fast harness
 

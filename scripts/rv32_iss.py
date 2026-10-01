@@ -27,7 +27,14 @@ UART_BASE = 0x10000000
 GPIO_BASE = 0x20000000
 CLINT_BASE = 0x02000000
 SYSCON_EXIT = 0x30000000
+VID_PIX_BASE = 0x40000000
+VID_PAL_BASE = 0x40010000
+VID_CTL_BASE = 0x40020000
+KEYS_BASE = 0x50000000
 GPIO_IN_VALUE = 0xA5A50000     # matches tb_soc.sv
+VID_WIDTH, VID_HEIGHT = 320, 200
+# the RTL rounds pixel storage up to a power of two covering the whole window
+VID_PIX_WORDS = 1 << ((VID_WIDTH * VID_HEIGHT + 3) // 4 - 1).bit_length()
 
 WILDCARD = "********"
 
@@ -73,6 +80,11 @@ class RV32ISS:
         self.mtval = 0
         self.gpio_out = 0
         self.gpio_oe = 0
+        # video: pixel memory covers the whole 64 KiB window, like the RTL
+        self.vram = bytearray(VID_PIX_WORDS * 4)
+        self.palette = [i * 0x010101 for i in range(256)]   # grayscale on reset
+        self.frame_count = 0
+        self.keys_ctrl = 0
         self.uart_out = []
         self.steps = 0
 
@@ -81,7 +93,9 @@ class RV32ISS:
         if (size == 4 and addr & 3) or (size == 2 and addr & 1):
             raise Trap(cause_misalign, addr)
         w = addr & ~3
-        mapped = (w < RAM_SIZE or (w >> 16) == 0x0200 or (w >> 12) in (0x10000, 0x20000, 0x30000))
+        mapped = (w < RAM_SIZE
+                  or (w >> 16) in (0x0200, 0x4000, 0x4001, 0x4002)
+                  or (w >> 12) in (0x10000, 0x20000, 0x30000, 0x50000))
         if not mapped:
             raise Trap(cause_fault, addr)
 
@@ -99,6 +113,27 @@ class RV32ISS:
         if (w >> 12) == 0x20000:
             off = w & 0xFF
             return {0x00: self.gpio_out, 0x04: GPIO_IN_VALUE, 0x08: self.gpio_oe}.get(off, 0), True
+        if (w >> 16) == 0x4000:                            # framebuffer pixels
+            i = (w - VID_PIX_BASE) & (VID_PIX_WORDS * 4 - 1)
+            return int.from_bytes(self.vram[i:i + 4], "little"), True
+        if (w >> 16) == 0x4001:                            # palette
+            return self.palette[(w >> 2) & 0xFF], True
+        if (w >> 16) == 0x4002:                            # video control
+            off = w & 0xFFF
+            if off == 0x04:
+                return self.frame_count, True
+            if off == 0x08:
+                return (VID_HEIGHT << 16) | VID_WIDTH, True
+            return 0, True
+        if (w >> 12) == 0x50000:                           # keys
+            off = w & 0xFFF
+            if off == 0x000:
+                return 0x80000000, True                    # queue always empty here
+            if off == 0x004:
+                return 0, True
+            if off == 0x008:
+                return self.keys_ctrl, True
+            return 0, True
         return 0, True
 
     def load(self, addr: int, size: int):
@@ -120,6 +155,21 @@ class RV32ISS:
         w = addr & ~3
         if w == SYSCON_EXIT:
             raise Halt(value)
+        if (w >> 16) == 0x4000:                            # framebuffer pixels
+            i = (addr - VID_PIX_BASE) & (VID_PIX_WORDS * 4 - 1)
+            self.vram[i:i + size] = value.to_bytes(size, "little")
+            return
+        if (w >> 16) == 0x4001:                            # palette
+            self.palette[(w >> 2) & 0xFF] = value & 0xFFFFFF
+            return
+        if (w >> 16) == 0x4002:                            # video control
+            if (w & 0xFFF) == 0x000:
+                self.frame_count += 1
+            return
+        if (w >> 12) == 0x50000:                           # keys
+            if (w & 0xFFF) == 0x008:
+                self.keys_ctrl = value & 1
+            return
         if w == UART_BASE and addr == w:
             self.uart_out.append(value & 0xFF)
         elif (w >> 12) == 0x20000:

@@ -5,7 +5,7 @@ run_tests.py - build and run the verification suites
     python scripts/run_tests.py                 # everything
     python scripts/run_tests.py isa             # directed ISA tests (+ co-simulation)
     python scripts/run_tests.py random -n 50    # 50 constrained-random programs
-    python scripts/run_tests.py fw -v           # firmware demo, show UART console
+    python scripts/run_tests.py fw -v           # firmware apps, show UART console
     python scripts/run_tests.py isa -k div      # filter by name
 
 Every ISA and random test is run twice: on the RTL (Icarus Verilog) and on the
@@ -43,6 +43,13 @@ RTL_SOURCES = (
 NO_COSIM = {"irq"}
 
 DEMO_UART_INPUT = "help,ping,stats,led,exit"
+
+# firmware apps run by the "fw" suite: name -> extra testbench plusargs
+FW_APPS = {
+    "demo":    [f"+uart_in={DEMO_UART_INPUT}"],
+    "testpat": ["+frames=build/frames/testpat_", "+keys=30,31"],
+}
+FRAME_DIR = BUILD / "frames"
 
 
 def find_prefix() -> str:
@@ -132,12 +139,14 @@ class Result:
     console: str = field(default="", repr=False)
 
 
-def run_rtl(vvp: Path, hex_: Path, trace: Path = None, uart_in: str = None, timeout=3_000_000):
+def run_rtl(vvp: Path, hex_: Path, trace: Path = None, uart_in: str = None, timeout=3_000_000,
+            extra=()):
     args = ["vvp", "-n", vvp, f"+hex={hex_}", f"+timeout={timeout}"]
     if trace:
         args.append(f"+trace={trace}")
     if uart_in:
         args.append(f"+uart_in={uart_in}")
+    args += list(extra)
     r = run(args, cwd=ROOT)
     out = "\n".join(l for l in r.stdout.splitlines() if "$readmemh" not in l and "$finish" not in l)
     return out
@@ -153,11 +162,11 @@ def parse_stats(out: str, res: Result):
 
 
 def run_program(name: str, hex_: Path, vvp: Path, do_cosim: bool, uart_in=None,
-                timeout=3_000_000) -> Result:
+                timeout=3_000_000, extra=()) -> Result:
     res = Result(name)
     t0 = time.time()
     rtl_trace = hex_.with_suffix(".rtl.trace") if do_cosim else None
-    out = run_rtl(vvp, hex_, rtl_trace, uart_in, timeout)
+    out = run_rtl(vvp, hex_, rtl_trace, uart_in, timeout, extra)
     res.console = out
     parse_stats(out, res)
     if "*** PASS ***" not in out:
@@ -211,15 +220,27 @@ def suite_random(vvp, pool, n, seed0, filt):
     return list(pool.map(job, seeds))
 
 
-def suite_fw(vvp, verbose):
-    try:
-        hex_ = build_firmware("demo")
-    except RuntimeError as e:
-        return [Result("fw/demo", False, str(e))]
-    res = run_program("fw/demo", hex_, vvp, False, uart_in=DEMO_UART_INPUT)
-    if verbose:
-        print(res.console)
-    return [res]
+def suite_fw(vvp, verbose, filt=""):
+    results = []
+    FRAME_DIR.mkdir(parents=True, exist_ok=True)
+    for app, extra in FW_APPS.items():
+        if filt and filt not in app:
+            continue
+        try:
+            hex_ = build_firmware(app)
+        except RuntimeError as e:
+            results.append(Result(f"fw/{app}", False, str(e)))
+            continue
+        res = run_program(f"fw/{app}", hex_, vvp, False, extra=extra)
+        if verbose:
+            print(res.console)
+        # turn any captured frames into PNGs and say where they went
+        frames = sorted(FRAME_DIR.glob(f"{app}_*.ppm"))
+        if frames:
+            run([sys.executable, ROOT / "scripts/ppm2png.py", "-q", *frames])
+            res.detail = f"{len(frames)} frame(s) -> {FRAME_DIR / (app + '_*.png')}"
+        results.append(res)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +267,7 @@ def main() -> int:
         if "random" in args.suites:
             results += suite_random(vvp, pool, args.num_random, args.seed, args.filter)
     if "fw" in args.suites:
-        results += suite_fw(vvp, args.verbose)
+        results += suite_fw(vvp, args.verbose, args.filter)
 
     w = max((len(r.name) for r in results), default=10)
     print(f"\n{'TEST':<{w}}  {'RESULT':<6}  {'INSNS':>8}  {'CPI':>5}  {'BPRED':>6}  DETAIL")

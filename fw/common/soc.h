@@ -31,6 +31,21 @@
 #define GPIO_IN           (GPIO_BASE + 0x04)
 #define GPIO_OE           (GPIO_BASE + 0x08)
 
+#define VID_PIX           0x40000000      /* WIDTH*HEIGHT colour indices   */
+#define VID_PAL           0x40010000      /* 256 x 0x00RRGGBB              */
+#define VID_CTL           0x40020000
+#define VID_CTL_PRESENT   (VID_CTL + 0x00)  /* write: frame is complete    */
+#define VID_CTL_FRAME     (VID_CTL + 0x04)  /* read: frames presented      */
+#define VID_CTL_MODE      (VID_CTL + 0x08)  /* read: height<<16 | width    */
+
+#define KEYS_BASE         0x50000000
+#define KEYS_DATA         (KEYS_BASE + 0x00)  /* read pops: [31]empty [8]pressed [7:0]code */
+#define KEYS_STATUS       (KEYS_BASE + 0x04)
+#define KEYS_CTRL         (KEYS_BASE + 0x08)
+#define KEYS_DATA_EMPTY   0x80000000
+#define KEYS_PRESSED      (1 << 8)
+#define KEYS_CTRL_IE      (1 << 0)
+
 #define SYSCON_BASE       0x30000000
 #define SYSCON_EXIT       (SYSCON_BASE + 0x00)
 

@@ -47,13 +47,13 @@ RVTEST_CODE_BEGIN
 
   TEST_TRAP( 8, 2, .word 0x00002063)  /* branch funct3=010 */
 
-  /* access faults */
-  li x5, 0x40000000
+  /* access faults: 0x9000_0000 is not backed by any device */
+  li x5, 0x90000000
   TEST_TRAP(10, 5, lw x6, 0(x5))
-  CHECK_TVAL(0x40000000)
-  li x5, 0x40000010
+  CHECK_TVAL(0x90000000)
+  li x5, 0x90000010
   TEST_TRAP(11, 7, sw x6, 4(x5))
-  CHECK_TVAL(0x40000014)
+  CHECK_TVAL(0x90000014)
 
   /* address-misaligned loads / stores */
   li x5, 0x1001
