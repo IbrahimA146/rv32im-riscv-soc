@@ -1,4 +1,6 @@
-# Start here
+# Getting started
+
+How to run the CPU that exists today. The DOOM work is tracked in [plan.md](plan.md).
 
 ## What this project is
 
@@ -16,21 +18,26 @@ Two halves:
 | `fw/` | **The program.** C code that runs *on* that CPU: boots it, runs benchmarks, blinks LEDs, answers typed commands. |
 | `tests/`, `scripts/` | **The proof it works.** Test programs, a reference model, and the tools that compare them. |
 
-## Tools you need (already installed on this machine)
+## Tools you need
 
-Installed from MSYS2 with
-`pacman -S mingw-w64-ucrt-x86_64-iverilog mingw-w64-ucrt-x86_64-riscv64-unknown-elf-gcc make`:
+1. **Icarus Verilog** (≥ 12) — the simulator that pretends to be the chip.
+2. **RISC-V GCC** (`riscv64-unknown-elf-gcc`, which covers rv32) — the compiler that turns the C firmware
+   into a program the chip can run.
+3. **Python** (≥ 3.9) — runs the test scripts.
+4. **make** — a convenience runner (optional, the Python commands below do the same thing).
 
-1. **Icarus Verilog** — the simulator that pretends to be the chip.
-2. **RISC-V GCC** — the compiler that turns the C firmware into a program the chip can run.
-3. **make** — a convenience runner (optional, the Python commands below do the same thing).
+```bash
+# Ubuntu
+sudo apt install iverilog gcc-riscv64-unknown-elf python3
+# Windows (MSYS2 UCRT64)
+pacman -S mingw-w64-ucrt-x86_64-iverilog mingw-w64-ucrt-x86_64-riscv64-unknown-elf-gcc make
+```
 
-Python 3 is also required and is already installed.
+Run every command below from the top folder of this repository.
 
 ## Command 1: watch the chip boot and run (~1 min)
 
 ```
-cd C:\Users\ibrah\Desktop\recitation
 python scripts/run_tests.py fw -v
 ```
 
@@ -74,7 +81,11 @@ make wave                                # write build/wave.vcd to open in a wav
 
 Nothing you run modifies the design — everything lands in `build/`, which you can delete at any time.
 
+Every build also writes an objdump listing (`build/**/*.lst`) and, for firmware, a linker map, which makes a
+failing trace line quick to map back to source.
+
 ## Where to read next
 
-`README.md` is the version written for recruiters and engineers: architecture diagrams, memory map,
-verification strategy, and the three real bugs this flow caught.
+* [architecture.md](architecture.md) — pipeline and SoC diagrams, memory map, design decisions.
+* [verification.md](verification.md) — the test strategy and the three real bugs it caught.
+* [plan.md](plan.md) — the six stages that get DOOM running on this CPU.
