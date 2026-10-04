@@ -113,11 +113,16 @@ def find_wad() -> Path:
     raise SystemExit("no WAD in external/ - run: python scripts/fetch_doom.py")
 
 
-def wad_blob(wad: Path) -> Path:
-    """Header + data, as the harness loads it into RAM."""
+ARGS_LEN = 120
+
+
+def wad_blob(wad: Path, doom_args: str) -> Path:
+    """Header (magic, size, command line) followed by the WAD itself."""
     data = wad.read_bytes()
+    args = doom_args.encode()[:ARGS_LEN - 1]
+    args = args + bytes(ARGS_LEN - len(args))
     blob = BUILD / "fw/doom/wad.bin"
-    blob.write_bytes(struct.pack("<II", WAD_MAGIC, len(data)) + data)
+    blob.write_bytes(struct.pack("<II", WAD_MAGIC, len(data)) + args + data)
     return blob
 
 
@@ -126,6 +131,7 @@ def main() -> int:
     ap.add_argument("--frames", type=int, default=1, help="stop after N presented frames")
     ap.add_argument("--timeout", type=int, default=4_000_000_000)
     ap.add_argument("--keys", default="", help="scancodes to inject, comma separated")
+    ap.add_argument("--doom-args", default="", help="extra DOOM options, e.g. -timedemo demo1")
     ap.add_argument("--video", action="store_true", help="encode the frames with ffmpeg")
     ap.add_argument("--fps", type=int, default=35, help="playback frame rate for the video")
     ap.add_argument("--build-only", action="store_true")
@@ -138,7 +144,7 @@ def main() -> int:
     print("building DOOM for rv32im ...")
     hex_ = build_firmware(args.jobs)
     wad = find_wad()
-    blob = wad_blob(wad)
+    blob = wad_blob(wad, args.doom_args)
     print(f"WAD: {wad.name} ({wad.stat().st_size / 1e6:.1f} MB)")
 
     sim = build_vsim.build("doom", RAM_MB * 1024 * 1024 // 4, 320, 200, 8, args.jobs)

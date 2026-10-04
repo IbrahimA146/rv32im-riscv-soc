@@ -85,7 +85,15 @@ These are real bugs from development, and they're the part of the project I'd ta
    result was thrown away, and it restarted, forever. The fix: a completed divide in MEM is never preempted, and the
    interrupt is taken on the next instruction. That guarantees progress at the cost of one instruction of latency
    ([rv32_core.sv](../rtl/core/rv32_core.sv)).
-3. **Holes in the test suite (found by mutation testing).** The first mutation run left 3 mutants alive:
+3. **A latent memory-map clash, caught by an old test.** Adding the framebuffer at `0x4000_0000` made
+   `traps.S` fail: it asserted that a load from that address raises an access fault, which stopped being true
+   the moment the address became a real device. The test was right to fail, and was retargeted to an address
+   that is still unmapped.
+4. **Statistics that overflowed at DOOM scale.** The branch-prediction percentage was computed as
+   `correct * 1000 / total` in 32-bit arithmetic. That is fine for a few thousand branches and wrong past
+   about four million: a DOOM run reported 22.5 % when the real figure was 90.7 %. Both harnesses now compute
+   it in 64-bit. A reminder that instrumentation needs the same scrutiny as the design.
+5. **Holes in the test suite (found by mutation testing).** The first mutation run left 3 mutants alive:
    * `minstret` counting trapped instructions → added an exact counter-delta test around an `ecall`.
    * A CSR write racing an interrupt → added a test where a timer fires every 23 cycles into a loop of
      *non-idempotent* `csrrw` swaps.

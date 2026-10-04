@@ -260,7 +260,8 @@ int main(int argc, char **argv) {
     dut.key_valid_i = 0;
     dut.key_event_i = 0;
 
-    uint64_t cycles = 0, instret = 0;
+    uint64_t cycles = 0, instret = 0, last_frame_cycle = 0;
+    std::vector<uint64_t> frame_cycles;
     uint32_t frames = 0;
     size_t   key_i = 0;
     uint64_t next_key = 20000;
@@ -317,8 +318,12 @@ int main(int argc, char **argv) {
             }
         }
 
-        if (dut.frame_strobe_o && !opt.frames.empty()) {
-            save_frame(dut, opt.frames, dut.frame_count_o, VID_WIDTH, VID_HEIGHT);
+        if (dut.frame_strobe_o) {
+            // per-frame cost, which is what sets the achievable frame rate
+            frame_cycles.push_back(cycles - last_frame_cycle);
+            last_frame_cycle = cycles;
+            if (!opt.frames.empty())
+                save_frame(dut, opt.frames, dut.frame_count_o, VID_WIDTH, VID_HEIGHT);
             if (opt.max_frames && ++frames >= static_cast<uint32_t>(opt.max_frames)) {
                 exit_code = 0;
                 break;
@@ -337,9 +342,29 @@ int main(int argc, char **argv) {
     if (instret)
         printf(" CPI           : %llu.%03llu\n", (unsigned long long)(cycles / instret),
                (unsigned long long)((cycles % instret) * 1000 / instret));
-    if (branches)
-        printf(" branch pred.  : %u/%u correct (%u.%u%%)\n", branches - misses, branches,
-               (branches - misses) * 100 / branches, ((branches - misses) * 1000 / branches) % 10);
+    if (branches) {
+        // 64-bit: correct-count x 1000 overflows 32 bits past ~4 M branches,
+        // which a few seconds of DOOM passes easily
+        uint64_t good = branches - misses;
+        printf(" branch pred.  : %u/%u correct (%llu.%llu%%)\n", branches - misses, branches,
+               (unsigned long long)(good * 100 / branches),
+               (unsigned long long)((good * 1000 / branches) % 10));
+    }
+    if (frame_cycles.size() > 1) {
+        // skip the first entry: it covers start-up, not a rendered frame
+        uint64_t total = 0, worst = 0;
+        for (size_t i = 1; i < frame_cycles.size(); i++) {
+            total += frame_cycles[i];
+            if (frame_cycles[i] > worst) worst = frame_cycles[i];
+        }
+        uint64_t mean = total / (frame_cycles.size() - 1);
+        printf(" frames        : %llu\n", (unsigned long long)(frame_cycles.size() - 1));
+        printf(" cycles/frame  : %llu mean, %llu worst\n",
+               (unsigned long long)mean, (unsigned long long)worst);
+        if (mean)
+            printf(" fps at 50 MHz : %llu.%llu\n", (unsigned long long)(50000000ull / mean),
+                   (unsigned long long)((500000000ull / mean) % 10));
+    }
     printf("---------------------------------------------------------------\n");
 
     if (exit_code < 0) {

@@ -12,9 +12,9 @@ existing regression is still green.
 | 1 | Screen, keys, memory | a test pattern drawn by the chip | done |
 | 2 | Fast harness | the whole regression in seconds | done |
 | 3 | C library | malloc/printf/qsort working on the chip | done |
-| 4 | DOOM port | the title screen, rendered by the pipeline | next |
-| 5 | Video | DOOM running, as an mp4 in the README | |
-| 6 | Browser (stretch) | DOOM playable in a tab, live CPU panel | |
+| 4 | DOOM port | the title screen, rendered by the pipeline | done |
+| 5 | Video | DOOM running, as an mp4 in the README | done |
+| 6 | Browser (stretch) | DOOM playable in a tab, live CPU panel | not attempted |
 
 ---
 
@@ -106,14 +106,33 @@ library has none of them.
 * **Build:** `fw/apps/doom/` — implement `DG_Init`, `DG_DrawFrame` (copy to framebuffer), `DG_SleepMs`,
   `DG_GetTicksMs` (from `mtime`), `DG_GetKey` (from the key FIFO). Freedoom supplies the game data.
 * **Done when:** the title screen, rendered by the RTL, is saved as a PNG that looks like DOOM.
+* **Done.** `fw/apps/doom/main.c` implements the five hooks against this chip's devices. DOOM is built in
+  CMAP256 mode at 320x200, so its 8-bit framebuffer and 256-entry palette map onto `soc_video.sv` with no
+  conversion. The WAD is dropped into RAM by the harness and published through the stage-3 in-memory
+  filesystem, so DOOM's own `fopen`/`fread` works unchanged and the program image stays small.
+  `i_sound_stub.c` replaces the SDL_mixer backend with silence. The title screen appears after 14.4 M
+  instructions.
 
 ## Stage 5 — Video
 
 * **Build:** run DOOM's built-in demo playback — deterministic, needs no keyboard — dump every frame, and
   assemble them with ffmpeg. Print measured cycles/frame, instructions/frame, CPI and branch-prediction
   accuracy from the hardware counters alongside.
-* **Done when:** the README shows a video of DOOM running on the CPU, labelled with its real frame rate and
-  how much faster than real time the playback is.
+* **Done when:** the README shows a video of DOOM running on the CPU, labelled with its real frame rate.
+* **Done.** `-timedemo demo1` plays DOOM's built-in demo with no input needed, which also makes the run
+  deterministic. 400 frames measured:
+
+  | | |
+  |---|---|
+  | instructions | 531,900,311 |
+  | CPI | 1.165 |
+  | branch prediction | 90.7 % |
+  | cycles per frame | 1,507,304 mean / 2,072,143 worst |
+  | implied rate at 50 MHz | 33.1 fps |
+  | simulation speed | ~6 M cycles/s, about 4 frames/s wall clock |
+
+  The frame rate is a projection from measured cycles per frame, assuming the design meets its 50 MHz target;
+  it has never been synthesized, so that assumption is untested.
 
 ## Stage 6 — Browser (stretch, only after stage 5)
 

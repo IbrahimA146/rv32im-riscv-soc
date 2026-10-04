@@ -23,9 +23,17 @@
 #include "doomkeys.h"
 #include "i_video.h"
 
-/* Where the harness drops the WAD: {magic, size} then the data itself. */
-#define WAD_ADDR  0x01000000u
-#define WAD_MAGIC 0x57414442u   /* "WADB" */
+/* Where the harness drops the WAD. The header carries the size and the DOOM
+ * command line, so options can change without rebuilding the firmware. */
+#define WAD_ADDR     0x01000000u
+#define WAD_MAGIC    0x57414442u   /* "WADB" */
+#define WAD_ARGS_LEN 120
+
+typedef struct {
+    uint32_t magic;
+    uint32_t size;
+    char     args[WAD_ARGS_LEN];
+} wad_header_t;
 
 #define SCREEN_W 320
 #define SCREEN_H 200
@@ -113,24 +121,48 @@ int main(void)
 {
     uart_init();
 
-    const uint32_t *hdr = (const uint32_t *)WAD_ADDR;
-    if (hdr[0] != WAD_MAGIC) {
+    const wad_header_t *hdr = (const wad_header_t *)WAD_ADDR;
+    if (hdr->magic != WAD_MAGIC) {
         printf("no WAD at %08x (magic %08x) - pass --wad to the harness\n",
-               WAD_ADDR, hdr[0]);
+               WAD_ADDR, hdr->magic);
         return 1;
     }
-    uint32_t wad_size = hdr[1];
-    romfs_add("doom1.wad", hdr + 2, wad_size);
-    printf("\nDOOM on RV32IM: WAD %u bytes at %08x\n", wad_size, WAD_ADDR);
+    romfs_add("doom1.wad", hdr + 1, hdr->size);
+    printf("\nDOOM on RV32IM: WAD %u bytes at %08x\n", hdr->size, WAD_ADDR);
 
+    /* fixed options, then whatever command line the harness passed in */
     static char arg0[] = "doom";
     static char arg1[] = "-iwad";
     static char arg2[] = "doom1.wad";
-    static char arg3[] = "-mb";          /* zone size in MiB */
-    static char arg4[] = "6";
-    char *argv[] = { arg0, arg1, arg2, arg3, arg4, NULL };
+    static char arg3[] = "-mb";
+    static char arg4[] = "6";            /* zone size in MiB */
+    static char cmdline[WAD_ARGS_LEN];
 
-    doomgeneric_Create(5, argv);
+    char *argv[16];
+    int argc = 0;
+    argv[argc++] = arg0;
+    argv[argc++] = arg1;
+    argv[argc++] = arg2;
+    argv[argc++] = arg3;
+    argv[argc++] = arg4;
+
+    memcpy(cmdline, hdr->args, WAD_ARGS_LEN - 1);
+    for (char *p = cmdline; *p && argc < 15;) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        argv[argc++] = p;
+        while (*p && *p != ' ') p++;
+        if (*p) *p++ = 0;
+    }
+    argv[argc] = NULL;
+    if (argc > 5) {
+        printf("doom args:");
+        for (int i = 5; i < argc; i++)
+            printf(" %s", argv[i]);
+        printf("\n");
+    }
+
+    doomgeneric_Create(argc, argv);
 
     for (;;)
         doomgeneric_Tick();

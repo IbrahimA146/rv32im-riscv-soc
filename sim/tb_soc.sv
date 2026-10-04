@@ -264,7 +264,7 @@ module tb_soc #(
   end
 
   task automatic finish_sim(input [31:0] code);
-    integer branches, mispredicts;
+    longint branches, mispredicts;   // 64-bit: x1000 overflows 32 bits
     branches    = dut.u_core.u_csr.hpm3_q;
     mispredicts = dut.u_core.u_csr.hpm4_q;
     if (tracing) $fclose(trace_fd);

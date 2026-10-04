@@ -1,58 +1,96 @@
 # DOOM on a CPU I designed
 
-A RISC-V processor built from scratch, the small computer around it, and the firmware that runs on it,
-now being extended until it plays DOOM — on the real RTL, in simulation, recorded as a video.
+![DOOM running on the CPU](docs/images/doom.gif)
 
-## Where it stands
+DOOM, running on a RISC-V processor I built from scratch in SystemVerilog. Every pixel above was rendered by
+the five-stage pipeline in [`rtl/`](rtl/), executing compiled C, and captured from its framebuffer. No
+emulator stands in for the CPU — the RTL itself executes all 532 million instructions.
 
-* **Working today:** the CPU, the system-on-chip, bare-metal firmware, and a verification flow that checks
-  every instruction against a reference model.
-* **In progress:** the DOOM port. Groundwork done (Verilator brought the simulator from ~10 k to 1.63 M
-  cycles/s, a 170x speedup on the same RTL). **Stage 1 done:** the chip now has a screen and a keyboard.
-  Stage 2 (the fast harness) is next.
+| | |
+|---|---|
+| **The chip** | RV32IM + Zicsr, 5-stage pipeline, forwarding, load-use interlocks, BTB + bimodal branch prediction, iterative divider, precise exceptions and interrupts |
+| **The system** | RAM, UART, timer/CLINT, GPIO, 320×200 indexed-colour framebuffer, keyboard queue, bus-fault detection |
+| **The software** | bare-metal C, own `crt0` and trap handler, newlib retargeted onto the SoC, then DOOM itself |
+| **DOOM** | **1.51 M cycles per frame**, CPI **1.165**, branch prediction **90.7 %** over 532 M instructions |
+| **Verification** | 64 tests, every instruction cross-checked against a golden model, **26/26 injected bugs caught** |
 
-![test pattern drawn by the CPU](docs/images/testpat.png)
+**At the SoC's 50 MHz design clock, 1.51 M cycles per frame works out to ~33 fps.** That is a projection from
+measured cycle counts, not a measurement on silicon: this design has never been synthesized to an FPGA. What
+is measured is the cycle count, and it is measured on the real RTL.
 
-*Every pixel above was written one byte at a time by the CPU in `rtl/`, running compiled C, and captured
-from the framebuffer by the testbench.*
+---
 
-## The pieces
+## How a game ends up running on a CPU that didn't exist
 
-| Folder | What it is | State |
-|---|---|---|
-| `rtl/` | **The chip.** A 5-stage pipelined RV32IM CPU plus timer, serial port, GPIO, framebuffer and keyboard. | working |
-| `fw/` | **The program.** C firmware that boots the chip and runs on it. | working |
-| `tests/` `scripts/` `sim/` | **The proof.** Test programs, a reference model, and the tools that compare them. | working |
-| `model/` | **The fast model.** The same CPU in C, quick enough to run a game. | stage 2 |
-| `fw/apps/doom/` | **The game.** DOOM ported to the chip. | stage 3 |
-| `web/` | **The page.** The model in a browser, with the live CPU panel. | stages 4â€“5 |
+```mermaid
+flowchart LR
+    C[DOOM C source] --> GCC[riscv gcc] --> IMG[program image]
+    IMG --> RTL["the CPU in rtl/<br/>(SystemVerilog)"]
+    WAD[(doom1.wad)] --> RTL
+    RTL --> FB[framebuffer] --> PNG[captured frames] --> VID[video]
+    RTL --> TRACE[commit trace] --> ISS[Python golden model]
+    ISS --> CHK{identical?}
+    TRACE --> CHK
+```
 
-## Roadmap
+DOOM is compiled for the instruction set this CPU implements, loaded into its memory, and executed one
+instruction at a time by the pipeline. When the game writes a pixel, that is a store instruction travelling
+through MEM into the framebuffer. The same run also emits a trace of every committed instruction, which is
+compared against an independent Python model of the ISA — so correctness is checked on the exact run that
+produced the picture.
 
-| # | Stage | You can see | |
-|---|---|---|---|
-| 1 | Screen, keys, memory | a test pattern drawn by the chip | **done** |
-| 2 | Fast harness | the whole regression in seconds | next |
-| 3 | C library | malloc/printf/qsort working on the chip | |
-| 4 | DOOM port | the title screen, rendered by the pipeline | |
-| 5 | Video | DOOM running, as an mp4 in the README | |
-| 6 | Browser (stretch) | DOOM playable in a tab, live CPU panel | |
+| Folder | What it is |
+|---|---|
+| [`rtl/core/`](rtl/core) | The processor: pipeline, decoder, ALU, multiplier, divider, CSRs, branch predictor |
+| [`rtl/soc/`](rtl/soc) | Everything around it: memory, UART, timer, GPIO, video, keyboard |
+| [`fw/`](fw) | Startup code, drivers, newlib retargeting, and the DOOM platform layer |
+| [`sim/`](sim) | Two harnesses: a SystemVerilog testbench and a C++ one for speed |
+| [`tests/`](tests) `scripts/` | The golden model, the test suites, and the mutation tester |
 
-Details, measurements and the "done when" check for each stage are in [docs/plan.md](docs/plan.md).
+## Verification
+
+The part I would most want to be asked about.
+
+* **Differential co-simulation.** Every ISA and random test runs on the RTL *and* on a Python model of the
+  instruction set, and the two commit traces must match instruction by instruction. A mismatch names the
+  exact instruction where they diverged.
+* **Two independent simulators.** `--sim=both` runs everything under Verilator and Icarus Verilog. Traces and
+  captured frames are identical between them.
+* **~5,800 generated directed vectors** covering every opcode against edge-case operands, plus hand-written
+  tests for traps, interrupts, CSRs and pipeline hazards, plus a constrained-random program generator.
+* **Mutation testing.** 26 realistic bugs are injected into copies of the RTL one at a time; the suite must
+  catch every one. It does. The first run left three alive, which exposed real gaps in the tests — those gaps
+  are now closed.
+
+Four bugs this flow caught are written up in [docs/verification.md](docs/verification.md), including a
+multiply that silently truncated to 33 bits and an interrupt livelock that could stall a divide forever.
 
 ## Run it
 
-Needs Icarus Verilog, a RISC-V GCC and Python 3 ([setup](docs/getting-started.md)).
+Needs Icarus Verilog, Verilator, a RISC-V GCC and Python 3 ([setup](docs/getting-started.md)).
 
 ```bash
-python scripts/run_tests.py fw -v     # boot the chip, watch its console, draw a frame
-python scripts/run_tests.py           # every test, checked against the reference model
-python scripts/mutation_test.py       # break the chip 26 ways, confirm the tests notice
+python scripts/run_tests.py          # the whole suite, ~8 s
+python scripts/mutation_test.py      # break the chip 26 ways, confirm the tests notice
+python scripts/fetch_doom.py         # DOOM source + shareware WAD into external/
+python scripts/build_doom.py --frames 400 --doom-args="-timedemo demo1" --video
 ```
 
-## Read more
+The last line builds DOOM for this CPU, runs it on the RTL, saves every frame and encodes the video. It takes
+about two minutes for 400 frames — simulation runs at roughly 6 M cycles/s, about 4 frames per second.
 
-* [Getting started](docs/getting-started.md) â€” what each command shows, in plain language
-* [Architecture](docs/architecture.md) â€” pipeline, memory map, performance, design decisions
-* [Verification](docs/verification.md) â€” co-simulation, random tests, mutation testing, bugs found
-* [Plan](docs/plan.md) â€” the six DOOM stages
+## What this is and isn't
+
+* The CPU, SoC, firmware, testbench, golden model and verification flow are mine. DOOM is id Software's,
+  via [doomgeneric](https://github.com/ozkl/doomgeneric); the WAD is the freely redistributable shareware
+  episode. Neither is committed here — `fetch_doom.py` downloads them.
+* It runs **in simulation**. Nothing here has been synthesized, placed, routed or timed on an FPGA, so the
+  50 MHz figure is a design target, not a measured maximum frequency.
+* No sound (the SoC has no audio device), no U-mode, PMP or compressed instructions.
+
+## Docs
+
+* [Getting started](docs/getting-started.md) — what each command does, in plain language
+* [Architecture](docs/architecture.md) — pipeline, hazards, memory map, design decisions
+* [Verification](docs/verification.md) — co-simulation, random tests, mutation testing, bugs found
+* [Plan](docs/plan.md) — the staged route to DOOM, with measurements at each step
