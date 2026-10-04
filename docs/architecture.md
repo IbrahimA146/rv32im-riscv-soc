@@ -84,7 +84,8 @@ flowchart LR
 | `0x5000_0000` | KEYS | `DATA` (read pops) `STATUS` `CTRL`, IRQ into MEIP |
 
 Implemented CSRs: `mstatus misa mie mtvec mscratch mepc mcause mtval mip mcycle[h] minstret[h]
-mhpmcounter3` (resolved branches), `mhpmcounter4` (mispredictions), `mvendorid marchid mimpid mhartid`.
+mhpmcounter3` (resolved branches), `mhpmcounter4` (mispredictions), `mhpmcounter5` (load-use stall
+cycles), `mhpmcounter6` (divider stall cycles), `mvendorid marchid mimpid mhartid`.
 Unknown CSRs and writes to read-only CSRs raise illegal-instruction.
 
 ## Performance
