@@ -13,10 +13,17 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y iverilog gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+          sudo apt-get install -y iverilog verilator gcc-riscv64-unknown-elf \
+                                  binutils-riscv64-unknown-elf
 
-      - name: Regression (ISA + random co-simulation + firmware)
-        run: python3 scripts/run_tests.py isa random fw -n 50
+      - name: Regression on both simulators
+        run: python3 scripts/run_tests.py isa random fw -n 50 --sim=both
 
       - name: Mutation testing
         run: python3 scripts/mutation_test.py
+
+      - name: Lint the RTL with Verilator
+        run: |
+          verilator --lint-only -Wall --timing -top soc_top \
+            -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-VARHIDDEN \
+            rtl/core/rv32_pkg.sv $(ls rtl/core/*.sv | grep -v pkg) rtl/soc/*.sv

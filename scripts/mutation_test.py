@@ -134,7 +134,7 @@ def main() -> int:
 
     t0 = time.time()
     print("building test programs ...")
-    rt.compile_rtl()
+    rt.compile_sim("icarus")   # mutants are built and run under Icarus
     rt.run([sys.executable, rt.ROOT / "tests/isa/gen_isa_tests.py"])
     programs = []                                   # (name, hex, cosim)
     for src in sorted((rt.ROOT / "tests/isa").glob("*.S")) + sorted((rt.ROOT / "tests/isa/generated").glob("*.S")):
