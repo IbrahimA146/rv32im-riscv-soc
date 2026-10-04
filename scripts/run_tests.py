@@ -137,6 +137,10 @@ def build_asm(src: Path, out_dir: Path) -> Path:
 
 
 def build_firmware(app: str) -> Path:
+    if not rv32_lib_dirs():
+        raise ToolchainMissing(
+            "no rv32im C library in this toolchain: firmware needs newlib "
+            "(the ISA, random and mutation suites do not)")
     out = BUILD / "fw" / app
     out.mkdir(parents=True, exist_ok=True)
     srcs = sorted((ROOT / "fw/common").glob("*.[cS]")) + sorted((ROOT / "fw/apps" / app).glob("*.[cS]"))
@@ -156,10 +160,15 @@ def build_firmware(app: str) -> Path:
 # ---------------------------------------------------------------------------
 # Execution
 # ---------------------------------------------------------------------------
+class ToolchainMissing(RuntimeError):
+    """The toolchain cannot build this target (e.g. no rv32 C library)."""
+
+
 @dataclass
 class Result:
     name: str
     ok: bool = False
+    skipped: bool = False
     detail: str = ""
     cycles: int = 0
     insns: int = 0
@@ -265,6 +274,9 @@ def suite_fw(sim_exe, verbose, filt=""):
             continue
         try:
             hex_ = build_firmware(app)
+        except ToolchainMissing as e:
+            results.append(Result(f"fw/{app}", ok=True, skipped=True, detail=f"skipped: {e}"))
+            continue
         except RuntimeError as e:
             results.append(Result(f"fw/{app}", False, str(e)))
             continue
@@ -319,14 +331,17 @@ def main() -> int:
     print("-" * (w + 60))
     for r in results:
         cpi = f"{r.cycles / r.insns:.2f}" if r.insns else "-"
-        status = "PASS" if r.ok else "FAIL"
+        status = "SKIP" if r.skipped else "PASS" if r.ok else "FAIL"
         detail = r.detail if r.ok else r.detail.replace("\n", "\n" + " " * (w + 2))
         print(f"{r.name:<{w}}  {status:<6}  {r.insns:>8}  {cpi:>5}  {r.bpred:>6}  {detail}")
-    passed = sum(r.ok for r in results)
+    skipped = sum(r.skipped for r in results)
+    passed = sum(r.ok and not r.skipped for r in results)
+    total = len(results) - skipped
     total_insns = sum(r.insns for r in results)
     print("-" * (w + 60))
-    print(f"{passed}/{len(results)} passed, {total_insns:,} instructions verified "
-          f"in {time.time() - t0:.1f}s")
+    print(f"{passed}/{total} passed"
+          + (f", {skipped} skipped" if skipped else "")
+          + f", {total_insns:,} instructions verified in {time.time() - t0:.1f}s")
     return 0 if passed == len(results) else 1
 
 

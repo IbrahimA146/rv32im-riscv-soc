@@ -13,17 +13,26 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y iverilog verilator gcc-riscv64-unknown-elf \
-                                  binutils-riscv64-unknown-elf
-
-      - name: Regression on both simulators
-        run: python3 scripts/run_tests.py isa random fw -n 50 --sim=both
-
-      - name: Mutation testing
-        run: python3 scripts/mutation_test.py
+          sudo apt-get install -y iverilog verilator gcc-riscv64-unknown-elf
+          iverilog -V | head -1
+          verilator --version
+          riscv64-unknown-elf-gcc --version | head -1
+          # The firmware suites need an rv32 C library. Ubuntu's bare-metal GCC
+          # does not always ship one; run_tests.py skips them when it is absent.
+          riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 \
+            -print-file-name=libc.a || true
 
       - name: Lint the RTL with Verilator
         run: |
           verilator --lint-only -Wall --timing -top soc_top \
             -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-VARHIDDEN \
             rtl/core/rv32_pkg.sv $(ls rtl/core/*.sv | grep -v pkg) rtl/soc/*.sv
+
+      - name: ISA and random tests, on both simulators
+        run: python3 scripts/run_tests.py isa random -n 50 --sim=both
+
+      - name: Firmware (skipped automatically without an rv32 C library)
+        run: python3 scripts/run_tests.py fw
+
+      - name: Mutation testing
+        run: python3 scripts/mutation_test.py
