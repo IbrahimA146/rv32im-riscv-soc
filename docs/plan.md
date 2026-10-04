@@ -10,9 +10,9 @@ existing regression is still green.
 |---|---|---|---|
 | 0 | Groundwork | measured simulator speed, this plan | done |
 | 1 | Screen, keys, memory | a test pattern drawn by the chip | done |
-| 2 | Fast harness | the whole regression in seconds | next |
-| 3 | C library | malloc/printf/qsort working on the chip | |
-| 4 | DOOM port | the title screen, rendered by the pipeline | |
+| 2 | Fast harness | the whole regression in seconds | done |
+| 3 | C library | malloc/printf/qsort working on the chip | done |
+| 4 | DOOM port | the title screen, rendered by the pipeline | next |
 | 5 | Video | DOOM running, as an mp4 in the README | |
 | 6 | Browser (stretch) | DOOM playable in a tab, live CPU panel | |
 
@@ -72,9 +72,14 @@ The coroutine-based testbench costs speed. DOOM needs a purpose-built harness.
   framebuffer and keyboard, writes frames to disk. Verilator becomes a second signoff simulator in
   `run_tests.py` (`--sim=verilator`).
 * **Done when:** every regression test produces a commit trace identical to Icarus and to the ISS, the suite
-  runs in seconds instead of minutes, and the harness sustains ≥ 5 M cycles/s. Also resolve the known
-  1-cycle difference in the testbench's own cycle counter between the two simulators (counting artifact, not
-  a design difference — but it must be explained, not ignored).
+  runs in seconds instead of minutes, and the harness sustains ≥ 5 M cycles/s.
+* **Done.** `sim/verilator/main.cpp` drives the clock directly and re-implements the testbench's jobs in C++
+  (serial decode, key injection, frame capture, commit trace). The full suite runs in **6.4 s instead of
+  189 s**, at **4.5 M cycles/s**, and `--sim=both` runs every test on both simulators: traces match the ISS
+  under each, and captured frames are byte-identical between them. The earlier 1-cycle counter difference was
+  the SystemVerilog testbench counting one extra cycle around `$finish`; both harnesses now agree.
+  Verilator also rejected resetting 256 palette entries in a loop — a fair complaint, since that would have
+  cost 6k flip-flops, so the palette now initialises like block RAM.
 
 ## Stage 3 — C library
 
@@ -86,6 +91,13 @@ library has none of them.
   read-only blob behind a tiny in-memory file shim, so no block device is needed.
 * **Done when:** a test app that mallocs, sprintfs, qsorts and reads the embedded WAD header runs correctly
   on the chip, and the regression still passes with the new toolchain.
+* **Done, with no download at all.** The installed toolchain already ships an `rv32im/ilp32` newlib; the
+  earlier "no rv32 libc" conclusion was wrong because `-march=rv32im_zicsr` matches no multilib name, so GCC
+  silently fell back to the 64-bit libraries. Asking the plain `rv32im` driver for its library directories and
+  putting those first on the link line fixes it. `fw/common/syscalls.c` retargets newlib onto the SoC
+  (`_write` to the UART, `_sbrk` to a heap that stops short of the stack, `_exit` to SYSCON) and adds a small
+  read-only in-memory filesystem, which is how the WAD is served without a block device. `fw/apps/libctest`
+  checks heap, printf, qsort/bsearch, strings and file I/O on the chip; newlib-nano keeps it inside 64 KiB.
 
 ## Stage 4 — DOOM port
 
