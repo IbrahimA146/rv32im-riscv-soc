@@ -1,5 +1,7 @@
 # DOOM on a CPU I designed
 
+[![regression](https://github.com/IbrahimA146/rv32im-riscv-soc/actions/workflows/ci.yml/badge.svg)](https://github.com/IbrahimA146/rv32im-riscv-soc/actions/workflows/ci.yml)
+
 ![DOOM running on the CPU](docs/images/doom.gif)
 
 DOOM, running on a RISC-V processor I built from scratch in SystemVerilog. Every pixel above was rendered by
@@ -62,8 +64,12 @@ The part I would most want to be asked about.
   catch every one. It does. The first run left three alive, which exposed real gaps in the tests — those gaps
   are now closed.
 
-Four bugs this flow caught are written up in [docs/verification.md](docs/verification.md), including a
+Five bugs this flow caught are written up in [docs/verification.md](docs/verification.md), including a
 multiply that silently truncated to 33 bits and an interrupt livelock that could stall a divide forever.
+
+Every push runs the co-simulated ISA and random suites plus all 26 mutants on a clean Ubuntu machine. The
+firmware suites are informational there: they need a RISC-V toolchain that ships an rv32 C library, and how
+to link one differs between toolchains. Nothing the CPU itself is judged on depends on that.
 
 ## Run it
 
