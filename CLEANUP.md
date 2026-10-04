@@ -4,7 +4,7 @@ A complete record, so the laptop can be returned to its previous state after the
 repository is pushed. Nothing here is needed to *read* the code on GitHub — only
 to build and run it.
 
-Last updated: 2026-10-04
+Last updated: 2026-10-04 (SDL2 added for interactive play)
 
 ---
 
@@ -56,17 +56,18 @@ project folder, so deleting the project does not remove them.
 | `mingw-w64-ucrt-x86_64-verilator` | 25 MB | turns the chip design into a fast simulator |
 | `mingw-w64-ucrt-x86_64-riscv64-unknown-elf-binutils` | 17 MB | assembler and linker for RISC-V |
 | `mingw-w64-ucrt-x86_64-iverilog` | 6 MB | the other simulator (used for cross-checking) |
+| `mingw-w64-ucrt-x86_64-SDL2` (+ vulkan-loader) | ~40 MB | opens the window and reads the keyboard when playing |
 | `make` | 1.6 MB | build runner |
 | `perl-Pod-Parser` | 0.2 MB | pulled in while fixing a Verilator launcher issue |
 
-Roughly **1.1 GB** in total.
+Roughly **1.2 GB** in total.
 
 ### Removing them
 
 Open **MSYS2 UCRT64** from the Start menu and run:
 
 ```bash
-pacman -R mingw-w64-ucrt-x86_64-verilator mingw-w64-ucrt-x86_64-iverilog mingw-w64-ucrt-x86_64-riscv64-unknown-elf-gcc mingw-w64-ucrt-x86_64-riscv64-unknown-elf-newlib mingw-w64-ucrt-x86_64-riscv64-unknown-elf-binutils make perl-Pod-Parser
+pacman -R mingw-w64-ucrt-x86_64-verilator mingw-w64-ucrt-x86_64-iverilog mingw-w64-ucrt-x86_64-riscv64-unknown-elf-gcc mingw-w64-ucrt-x86_64-riscv64-unknown-elf-newlib mingw-w64-ucrt-x86_64-riscv64-unknown-elf-binutils mingw-w64-ucrt-x86_64-SDL2 make perl-Pod-Parser
 ```
 
 Two cautions:

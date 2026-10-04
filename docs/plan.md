@@ -14,7 +14,7 @@ existing regression is still green.
 | 3 | C library | malloc/printf/qsort working on the chip | done |
 | 4 | DOOM port | the title screen, rendered by the pipeline | done |
 | 5 | Video | DOOM running, as an mp4 in the README | done |
-| 6 | Browser (stretch) | DOOM playable in a tab, live CPU panel | not attempted |
+| 6 | Playable | DOOM playable live, with a keyboard | done |
 
 ---
 
@@ -134,12 +134,23 @@ library has none of them.
   The frame rate is a projection from measured cycles per frame, assuming the design meets its 50 MHz target;
   it has never been synthesized, so that assumption is untested.
 
-## Stage 6 — Browser (stretch, only after stage 5)
+## Stage 6 — Playable
 
-Compile the Verilator model to WebAssembly with emscripten, add a canvas, keyboard input, and a panel showing
-pipeline activity and counters live. Attempt only once the video exists.
-
----
+* **Build:** `sim/verilator/display.h` adds an SDL window and live keyboard to the C++ harness: frames are
+  blitted when the chip presents them, host keys become the scancodes the SoC's keyboard device delivers.
+* **Done when:** you can play it with a keyboard at a frame rate that responds.
+* **Done, ~12 fps.** Three things got it there, and profiling decided all three:
+  * A sampling profiler (`--profile`, `scripts/profile_report.py`) samples the committed PC, which showed
+    58% of gameplay inside `R_DrawSpan`/`R_DrawColumn` — the renderer, exactly as expected — but also 23% in
+    the clock function, because it divided and division costs ~34 cycles on this core. Replacing the divide
+    with a multiply by a reciprocal removed that.
+  * DOOM's screen buffer now *is* the framebuffer (`DG_Init` repoints it), so a full-screen copy per frame
+    disappeared.
+  * A smaller viewport with low detail costs 1.8x fewer cycles per frame (1.33 M -> 0.74 M measured), which
+    is the difference between a slideshow and something controllable. Both are the game's own settings and
+    can be changed from its menu while playing.
+* **Not done:** the browser/WebAssembly version, which was the original stretch idea. Playing locally turned
+  out to be the better answer to the same question.
 
 ## What can honestly be claimed
 

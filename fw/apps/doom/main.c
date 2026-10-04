@@ -32,8 +32,25 @@
 typedef struct {
     uint32_t magic;
     uint32_t size;
+    uint32_t ticks_per_ms;   /* how fast the game should believe time passes */
+    uint8_t  screen_blocks;  /* 3..11 viewport size, 0 = leave alone   */
+    uint8_t  detail_level;   /* 1 = low detail (half horizontal pixels) */
+    uint8_t  pad[2];
     char     args[WAD_ARGS_LEN];
 } wad_header_t;
+
+/* doomgeneric compiles out DOOM's config-file reader, so these are set
+ * directly. DOOM's init calls R_SetViewSize(screenblocks, detailLevel), so the
+ * values must be in place before the game starts; they are the same two
+ * settings the in-game options menu changes. */
+extern int screenblocks;
+extern int detailLevel;
+
+static uint32_t ticks_per_ms = CLK_HZ / 1000;
+/* Reciprocal of ticks_per_ms, scaled by 2^32. Profiling the game showed 23% of
+ * all time inside the clock function, because dividing costs ~34 cycles on this
+ * core; a multiply-high is one cycle. */
+static uint32_t ticks_recip = (uint32_t)(((uint64_t)1 << 32) / (CLK_HZ / 1000));
 
 #define SCREEN_W 320
 #define SCREEN_H 200
@@ -44,6 +61,13 @@ typedef struct {
 void DG_Init(void)
 {
     gpio_set_oe(0xFF);
+
+    /* doomgeneric has just malloc'd a screen buffer that we would otherwise
+     * copy into video memory every frame. Point it at the framebuffer instead,
+     * so the game renders straight into the hardware and one full-screen copy
+     * per frame disappears. */
+    free(DG_ScreenBuffer);
+    DG_ScreenBuffer = (pixel_t *)VID_PIX;
 }
 
 void DG_DrawFrame(void)
@@ -56,19 +80,21 @@ void DG_DrawFrame(void)
         palette_changed = false;
     }
 
-    /* word-at-a-time copy: four pixels per store instead of one */
-    const uint32_t *src = (const uint32_t *)DG_ScreenBuffer;
-    volatile uint32_t *dst = (volatile uint32_t *)VID_PIX;
-    for (int i = 0; i < SCREEN_W * SCREEN_H / 4; i++)
-        dst[i] = src[i];
-
+    /* DG_ScreenBuffer is the framebuffer itself (see DG_Init), so the frame is
+     * already in video memory: just tell the display it is complete. */
     REG32(VID_CTL_PRESENT) = 1;
     gpio_write(REG32(VID_CTL_FRAME));          /* frame counter on the LEDs */
 }
 
 uint32_t DG_GetTicksMs(void)
 {
-    return REG32(CLINT_MTIME) / (CLK_HZ / 1000);
+    /* The timer counts simulated cycles. Dividing by the real 50 MHz figure
+     * makes the game run in slow motion when simulation is slower than
+     * hardware, so the harness passes the rate it actually achieves and the
+     * game then moves at the right speed, just with fewer frames.
+     * The divide is done as a multiply by the reciprocal: this function is
+     * called constantly, and division is the slowest thing this CPU does. */
+    return (uint32_t)(((uint64_t)REG32(CLINT_MTIME) * ticks_recip) >> 32);
 }
 
 void DG_SleepMs(uint32_t ms)
@@ -127,6 +153,10 @@ int main(void)
                WAD_ADDR, hdr->magic);
         return 1;
     }
+    if (hdr->ticks_per_ms) {
+        ticks_per_ms = hdr->ticks_per_ms;
+        ticks_recip  = (uint32_t)(((uint64_t)1 << 32) / ticks_per_ms);
+    }
     romfs_add("doom1.wad", hdr + 1, hdr->size);
     printf("\nDOOM on RV32IM: WAD %u bytes at %08x\n", hdr->size, WAD_ADDR);
 
@@ -160,6 +190,14 @@ int main(void)
         for (int i = 5; i < argc; i++)
             printf(" %s", argv[i]);
         printf("\n");
+    }
+
+    /* A smaller viewport and low detail cost far fewer cycles per frame, which
+     * is what makes the game playable at simulation speed. */
+    if (hdr->screen_blocks) {
+        screenblocks = hdr->screen_blocks;
+        detailLevel  = hdr->detail_level;
+        printf("view size %u, %s detail\n", screenblocks, detailLevel ? "low" : "high");
     }
 
     doomgeneric_Create(argc, argv);

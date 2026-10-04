@@ -32,13 +32,31 @@ def rtl_sources():
             + sorted((ROOT / "rtl/soc").glob("*.sv")))
 
 
-def build(name: str, ram_words: int, width: int, height: int, uart_div: int, jobs: int) -> Path:
+def sdl_available() -> bool:
+    """SDL2 is only needed for the interactive window."""
+    if os.name == "nt":
+        return (MSYS / "ucrt64/include/SDL2/SDL.h").is_file()
+    return subprocess.run(["pkg-config", "--exists", "sdl2"], capture_output=True).returncode == 0
+
+
+def build(name: str, ram_words: int, width: int, height: int, uart_div: int, jobs: int,
+          sdl: bool = False, fast: bool = False, threads: int = 0) -> Path:
     outdir = BUILD / f"vsim-{name}"
     exe = outdir / ("vsim.exe" if os.name == "nt" else "vsim")
     defines = f"-DRAM_WORDS={ram_words} -DVID_WIDTH={width} -DVID_HEIGHT={height}"
+    ldflags = []
+    if sdl:
+        if not sdl_available():
+            raise SystemExit("SDL2 not found: install mingw-w64-ucrt-x86_64-SDL2")
+        defines += " -DUSE_SDL"
+        ldflags = ["-LDFLAGS", "-lmingw32 -lSDL2main -lSDL2" if os.name == "nt" else "-lSDL2"]
+    # interactive play wants every bit of speed; -march=native is fine for a
+    # local tool that is rebuilt on the machine it runs on
+    cflags = "-O3 -march=native -flto" if fast else "-O2"
     cmd = [
         "verilator_bin", "--cc", "--exe", "--build", "-j", str(jobs),
-        "-O3", "-CFLAGS", f"-O2 {defines}",
+        "-O3", "-CFLAGS", f"{cflags} {defines}", *ldflags,
+        *(["--threads", str(threads)] if threads > 1 else []),
         "--x-assign", "fast", "--x-initial", "fast",
         "--timescale", "1ns/1ps", *WARN_OFF,
         f"-GRAM_WORDS={ram_words}", f"-GVID_WIDTH={width}", f"-GVID_HEIGHT={height}",

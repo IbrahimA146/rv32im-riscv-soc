@@ -13,19 +13,26 @@
 #include "Vsoc_top___024root.h"
 #include "verilated.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <map>
 #include <string>
 #include <vector>
+
+#include "display.h"
 
 namespace {
 
 constexpr uint32_t EXIT_ADDR = 0x30000000u;
 
 struct Options {
-    std::string hex, trace, frames, uart_in, keys, wad;
+    std::string hex, trace, frames, uart_in, keys, wad, profile;
     uint32_t wad_addr = 0x01000000;
+    bool play = false;             // open a window and take live input
+    int  scale = 2;
     uint64_t timeout = 3000000;
     int      uart_div = 8;
     int      max_frames = 0;       // 0 = unlimited
@@ -225,6 +232,9 @@ int main(int argc, char **argv) {
         else if (starts("--timeout"))  opt.timeout = strtoull(arg_value(argc, argv, i), nullptr, 0);
         else if (starts("--uart-div")) opt.uart_div = atoi(arg_value(argc, argv, i));
         else if (starts("--max-frames")) opt.max_frames = atoi(arg_value(argc, argv, i));
+        else if (starts("--scale"))    opt.scale = atoi(arg_value(argc, argv, i));
+        else if (starts("--play"))     opt.play = true;
+        else if (starts("--profile"))  opt.profile = arg_value(argc, argv, i);
         else if (starts("--quiet"))    opt.quiet = true;
         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
     }
@@ -268,7 +278,19 @@ int main(int argc, char **argv) {
     bool     key_down = false;
     int      exit_code = -1;
 
+    // sampling profiler: which code the CPU is actually in, by committed PC
+    std::map<uint32_t, uint64_t> pc_hist;
+    const uint64_t sample_every = 997;        // prime, to avoid lock-step
+
+    Display display;
+    std::deque<uint16_t> live_keys;        // host key events waiting to be fed in
+    uint64_t frames_shown = 0;
+    auto last_title = std::chrono::steady_clock::now();
+    if (opt.play && !display.open(VID_WIDTH, VID_HEIGHT, opt.scale))
+        return 2;
+
     auto tick = [&](int v) { dut.clk_i = v; dut.eval(); };
+    auto wall_start = std::chrono::steady_clock::now();
 
     for (uint64_t c = 0; c < opt.timeout; c++) {
         if (c == 5) dut.rst_ni = 1;
@@ -278,7 +300,11 @@ int main(int argc, char **argv) {
         tick(0);
         dut.uart_rx_i = uart_tx.tick();
         dut.key_valid_i = 0;
-        if (dut.rst_ni && key_i < key_codes.size() && c >= next_key) {
+        if (!live_keys.empty()) {          // one event per cycle, like the FIFO expects
+            dut.key_valid_i = 1;
+            dut.key_event_i = live_keys.front();
+            live_keys.pop_front();
+        } else if (dut.rst_ni && key_i < key_codes.size() && c >= next_key) {
             dut.key_valid_i = 1;
             dut.key_event_i = static_cast<uint16_t>((key_down ? 0 : 0x100) | (key_codes[key_i] & 0xFF));
             if (key_down) { key_i++; key_down = false; } else { key_down = true; }
@@ -295,6 +321,8 @@ int main(int argc, char **argv) {
         auto *root = dut.rootp;
         if (root->soc_top__DOT__u_core__DOT__wb_valid) {
             instret++;
+            if (!opt.profile.empty() && (cycles % sample_every) == 0)
+                pc_hist[root->soc_top__DOT__u_core__DOT__wb_pc]++;
             uint32_t pc   = root->soc_top__DOT__u_core__DOT__wb_pc;
             uint32_t insn = root->soc_top__DOT__u_core__DOT__wb_insn;
             uint32_t addr = root->soc_top__DOT__u_core__DOT__wb_mem_addr;
@@ -322,6 +350,25 @@ int main(int argc, char **argv) {
             // per-frame cost, which is what sets the achievable frame rate
             frame_cycles.push_back(cycles - last_frame_cycle);
             last_frame_cycle = cycles;
+            if (opt.play) {
+                display.present(dut.rootp->soc_top__DOT__u_video__DOT__pix,
+                                dut.rootp->soc_top__DOT__u_video__DOT__pal);
+                if (!display.poll(live_keys))
+                    break;                 // window closed
+                // live frame rate in the title bar, refreshed once a second
+                frames_shown++;
+                auto now = std::chrono::steady_clock::now();
+                double secs = std::chrono::duration<double>(now - last_title).count();
+                if (secs >= 1.0) {
+                    char title[160];
+                    snprintf(title, sizeof title,
+                             "DOOM on rv32im (RTL simulation) - %.1f fps, %llu cycles/frame",
+                             frames_shown / secs, (unsigned long long)frame_cycles.back());
+                    display.set_title(title);
+                    frames_shown = 0;
+                    last_title = now;
+                }
+            }
             if (!opt.frames.empty())
                 save_frame(dut, opt.frames, dut.frame_count_o, VID_WIDTH, VID_HEIGHT);
             if (opt.max_frames && ++frames >= static_cast<uint32_t>(opt.max_frames)) {
@@ -332,6 +379,16 @@ int main(int argc, char **argv) {
     }
 
     dut.final();
+
+    if (!opt.profile.empty()) {
+        FILE *pf = fopen(opt.profile.c_str(), "w");
+        if (pf) {
+            for (const auto &e : pc_hist)
+                fprintf(pf, "%08x %llu\n", e.first, (unsigned long long)e.second);
+            fclose(pf);
+            printf("profile: %zu addresses sampled -> %s\n", pc_hist.size(), opt.profile.c_str());
+        }
+    }
     if (trace) fclose(trace);
 
     uint32_t branches = dut.rootp->soc_top__DOT__u_core__DOT__u_csr__DOT__hpm3_q;
@@ -364,6 +421,14 @@ int main(int argc, char **argv) {
         if (mean)
             printf(" fps at 50 MHz : %llu.%llu\n", (unsigned long long)(50000000ull / mean),
                    (unsigned long long)((500000000ull / mean) % 10));
+    }
+    {   // wall-clock view: how fast the simulation itself managed to go
+        double secs = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - wall_start).count();
+        printf(" simulation    : %.1f s wall, %.2f M cycles/s", secs, cycles / secs / 1e6);
+        if (frame_cycles.size() > 1)
+            printf(", %.1f frames/s", (frame_cycles.size() - 1) / secs);
+        printf("\n");
     }
     printf("---------------------------------------------------------------\n");
 

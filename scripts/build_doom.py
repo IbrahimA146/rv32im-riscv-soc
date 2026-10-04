@@ -26,6 +26,12 @@ import build_vsim  # noqa: E402
 import run_tests as rt  # noqa: E402
 
 RAM_MB = 24
+SIM_TICKS_PER_MS = 6_700      # measured simulation rate, ~6.7 M cycles/s
+# Playing needs frames more than it needs pixels: a smaller viewport and low
+# detail cost 1.8x fewer cycles per frame (1.33 M -> 0.74 M measured), which is
+# the difference between a slideshow and something you can actually control.
+PLAY_SCREEN_SIZE = 7
+PLAY_LOW_DETAIL = 1
 WAD_ADDR = 0x01000000
 WAD_MAGIC = 0x57414442
 
@@ -114,15 +120,17 @@ def find_wad() -> Path:
 
 
 ARGS_LEN = 120
+CFG_LEN = 256
 
 
-def wad_blob(wad: Path, doom_args: str) -> Path:
-    """Header (magic, size, command line) followed by the WAD itself."""
+def wad_blob(wad: Path, doom_args: str, ticks_per_ms: int, blocks: int, detail: int) -> Path:
+    """Header (magic, size, clock rate, view settings, command line) then the WAD."""
     data = wad.read_bytes()
     args = doom_args.encode()[:ARGS_LEN - 1]
     args = args + bytes(ARGS_LEN - len(args))
     blob = BUILD / "fw/doom/wad.bin"
-    blob.write_bytes(struct.pack("<II", WAD_MAGIC, len(data)) + args + data)
+    blob.write_bytes(struct.pack("<IIIBBBB", WAD_MAGIC, len(data), ticks_per_ms,
+                                 blocks, detail, 0, 0) + args + data)
     return blob
 
 
@@ -134,6 +142,16 @@ def main() -> int:
     ap.add_argument("--doom-args", default="", help="extra DOOM options, e.g. -timedemo demo1")
     ap.add_argument("--video", action="store_true", help="encode the frames with ffmpeg")
     ap.add_argument("--fps", type=int, default=35, help="playback frame rate for the video")
+    ap.add_argument("--play", action="store_true",
+                    help="open a window and play it live (needs SDL2)")
+    ap.add_argument("--scale", type=int, default=2, help="window zoom for --play")
+    ap.add_argument("--screen-size", type=int, default=0,
+                    help="DOOM viewport size 3-11 (smaller renders fewer pixels, so it runs faster)")
+    ap.add_argument("--low-detail", action="store_true",
+                    help="DOOM's low detail mode: half horizontal resolution, roughly twice the speed")
+    ap.add_argument("--ticks-per-ms", type=int, default=0,
+                    help="cycles the game counts as a millisecond "
+                         "(default: 50000 when capturing, the measured simulation rate when playing)")
     ap.add_argument("--build-only", action="store_true")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4)
     args = ap.parse_args()
@@ -144,10 +162,20 @@ def main() -> int:
     print("building DOOM for rv32im ...")
     hex_ = build_firmware(args.jobs)
     wad = find_wad()
-    blob = wad_blob(wad, args.doom_args)
+    # when playing, time should pass at wall-clock speed, not at the speed a
+    # real 50 MHz chip would run; when capturing frames, 50 MHz is correct
+    ticks = args.ticks_per_ms or (SIM_TICKS_PER_MS if args.play else 50_000)
+
+    # doomgeneric compiles out DOOM's config-file reader, so the view settings
+    # travel in the header and the firmware applies them through R_SetViewSize
+    blocks = args.screen_size or (PLAY_SCREEN_SIZE if args.play else 0)
+    detail = int(args.low_detail) or (PLAY_LOW_DETAIL if args.play else 0)
+    blob = wad_blob(wad, args.doom_args, ticks, blocks, detail)
     print(f"WAD: {wad.name} ({wad.stat().st_size / 1e6:.1f} MB)")
 
-    sim = build_vsim.build("doom", RAM_MB * 1024 * 1024 // 4, 320, 200, 8, args.jobs)
+    name = "doom-play" if args.play else "doom"
+    sim = build_vsim.build(name, RAM_MB * 1024 * 1024 // 4, 320, 200, 8, args.jobs,
+                           sdl=args.play, fast=args.play)
     if args.build_only:
         return 0
 
@@ -157,8 +185,11 @@ def main() -> int:
     frames_dir.mkdir(parents=True)
 
     cmd = [str(sim), f"--hex={hex_}", f"--wad={blob}", f"--wad-addr={WAD_ADDR}",
-           f"--frames={frames_dir}/f_", f"--max-frames={args.frames}",
            f"--timeout={args.timeout}"]
+    if args.play:
+        cmd += ["--play", f"--scale={args.scale}"]
+    else:
+        cmd += [f"--frames={frames_dir}/f_", f"--max-frames={args.frames}"]
     if args.keys:
         cmd.append(f"--keys={args.keys}")
     print(" ".join(cmd))
