@@ -187,6 +187,11 @@ void _exit(int code)
 }
 
 int _kill(int pid, int sig) { (void)pid; (void)sig; errno = EINVAL; return -1; }
+
+/* There is no writable filesystem: saves and config writes fail cleanly. */
+int mkdir(const char *path, mode_t mode) { (void)path; (void)mode; errno = EROFS; return -1; }
+int _unlink(const char *path)            { (void)path; errno = EROFS; return -1; }
+int _link(const char *a, const char *b)  { (void)a; (void)b; errno = EROFS; return -1; }
 int _getpid(void)           { return 1; }
 
 clock_t _times(struct tms *buf)

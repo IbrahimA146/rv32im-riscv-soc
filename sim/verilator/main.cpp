@@ -24,7 +24,8 @@ namespace {
 constexpr uint32_t EXIT_ADDR = 0x30000000u;
 
 struct Options {
-    std::string hex, trace, frames, uart_in, keys;
+    std::string hex, trace, frames, uart_in, keys, wad;
+    uint32_t wad_addr = 0x01000000;
     uint64_t timeout = 3000000;
     int      uart_div = 8;
     int      max_frames = 0;       // 0 = unlimited
@@ -145,6 +146,33 @@ bool load_hex(const std::string &path, Vsoc_top &dut, size_t words) {
     return true;
 }
 
+// Drop a binary file straight into RAM (used for the DOOM WAD, which is far
+// too big to carry around inside the program image).
+bool load_blob(const std::string &path, Vsoc_top &dut, uint32_t addr, size_t words) {
+    FILE *f = fopen(path.c_str(), "rb");
+    if (!f) { fprintf(stderr, "ERROR: cannot open %s\n", path.c_str()); return false; }
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (addr % 4 || (addr + size) / 4 > words) {
+        fprintf(stderr, "ERROR: %s does not fit in RAM at 0x%08x\n", path.c_str(), addr);
+        fclose(f);
+        return false;
+    }
+    std::vector<uint8_t> buf(static_cast<size_t>(size));
+    if (fread(buf.data(), 1, buf.size(), f) != buf.size()) {
+        fprintf(stderr, "ERROR: short read on %s\n", path.c_str());
+        fclose(f);
+        return false;
+    }
+    fclose(f);
+    auto &mem = dut.rootp->soc_top__DOT__u_ram__DOT__mem;
+    for (size_t i = 0; i + 3 < buf.size(); i += 4)
+        mem[(addr + i) / 4] = buf[i] | (buf[i + 1] << 8) | (buf[i + 2] << 16) | (buf[i + 3] << 24);
+    printf("loaded %s (%ld bytes) at 0x%08x\n", path.c_str(), size, addr);
+    return true;
+}
+
 void save_frame(Vsoc_top &dut, const std::string &prefix, uint32_t n, int w, int h) {
     char name[512];
     snprintf(name, sizeof name, "%s%04u.ppm", prefix.c_str(), n);
@@ -192,6 +220,8 @@ int main(int argc, char **argv) {
         else if (starts("--frames"))   opt.frames = arg_value(argc, argv, i);
         else if (starts("--uart-in"))  opt.uart_in = arg_value(argc, argv, i);
         else if (starts("--keys"))     opt.keys = arg_value(argc, argv, i);
+        else if (starts("--wad-addr")) opt.wad_addr = strtoul(arg_value(argc, argv, i), nullptr, 0);
+        else if (starts("--wad"))      opt.wad = arg_value(argc, argv, i);
         else if (starts("--timeout"))  opt.timeout = strtoull(arg_value(argc, argv, i), nullptr, 0);
         else if (starts("--uart-div")) opt.uart_div = atoi(arg_value(argc, argv, i));
         else if (starts("--max-frames")) opt.max_frames = atoi(arg_value(argc, argv, i));
@@ -217,6 +247,7 @@ int main(int argc, char **argv) {
     dut.eval();
 
     if (!load_hex(opt.hex, dut, RAM_WORDS)) return 2;
+    if (!opt.wad.empty() && !load_blob(opt.wad, dut, opt.wad_addr, RAM_WORDS)) return 2;
 
     FILE *trace = opt.trace.empty() ? nullptr : fopen(opt.trace.c_str(), "w");
     UartRx uart_rx(opt.uart_div, opt.quiet);
