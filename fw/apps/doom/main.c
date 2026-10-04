@@ -21,6 +21,7 @@
 
 #include "doomgeneric.h"
 #include "doomkeys.h"
+#include "doomtype.h"
 #include "i_video.h"
 
 /* Where the harness drops the WAD. The header carries the size and the DOOM
@@ -35,7 +36,8 @@ typedef struct {
     uint32_t ticks_per_ms;   /* how fast the game should believe time passes */
     uint8_t  screen_blocks;  /* 3..11 viewport size, 0 = leave alone   */
     uint8_t  detail_level;   /* 1 = low detail (half horizontal pixels) */
-    uint8_t  pad[2];
+    uint8_t  fixed_step;     /* one game tic per frame instead of chasing the clock */
+    uint8_t  pad;
     char     args[WAD_ARGS_LEN];
 } wad_header_t;
 
@@ -45,6 +47,13 @@ typedef struct {
  * settings the in-game options menu changes. */
 extern int screenblocks;
 extern int detailLevel;
+
+/* With this set, DOOM advances exactly one game tic per rendered frame. Left
+ * clear, it compares against the clock and runs several tics per frame when
+ * rendering is slower than real time, which snowballs: more tics make the next
+ * frame slower still. One tic per frame keeps the game responsive and smooth,
+ * it simply runs at the pace the simulation can sustain. */
+extern boolean singletics;
 
 static uint32_t ticks_per_ms = CLK_HZ / 1000;
 /* Reciprocal of ticks_per_ms, scaled by 2^32. Profiling the game showed 23% of
@@ -194,6 +203,8 @@ int main(void)
 
     /* A smaller viewport and low detail cost far fewer cycles per frame, which
      * is what makes the game playable at simulation speed. */
+    if (hdr->fixed_step)
+        singletics = true;
     if (hdr->screen_blocks) {
         screenblocks = hdr->screen_blocks;
         detailLevel  = hdr->detail_level;

@@ -31,8 +31,23 @@ The first run spends a few minutes building; after that it starts in seconds.
 | Alt + arrows | sidestep |
 | Esc | menu (screen size, detail, controls) |
 
-It runs at **about 12 frames per second**, because your laptop has to imitate every wire of the chip. The
-design itself is not the slow part: at its 50 MHz clock the same code would run at **~35 fps**.
+### Watching the hardware while you play
+
+The console next to the game prints what the processor is doing, once a second:
+
+```
+  8.6 fps |  3.7 M cycles/s |  428098 cycles/frame | CPI 1.08 | branch  84.9% | stalls: load-use  1.6% divide  2.5%
+```
+
+Those are not estimates. The CPU counts the events itself in hardware performance counters
+(`mhpmcounter3-6`: branches, mispredictions, load-use stall cycles, divider stall cycles), exactly as a real
+processor does, and the window title shows the same figures. Watch the branch-prediction accuracy drop when
+the view fills with enemies, or the divider stalls climb when the renderer is working hardest.
+
+It runs at **7–12 frames per second**, because your laptop has to imitate every wire of the chip. The design
+itself is not the slow part: full-screen frames cost 1.33 M cycles, so at the 50 MHz this SoC is designed for
+the same code would run at **~35 fps** — a projection from measured cycle counts, since the design has been
+simulated rather than built on an FPGA.
 
 **What you need first** (all free): Python 3, plus these from [MSYS2](https://www.msys2.org/) — every tool is
 listed, with removal instructions, in [CLEANUP.md](CLEANUP.md):
@@ -104,13 +119,9 @@ multiply that silently truncated to 33 bits and an interrupt livelock that could
 
 Every push re-runs the co-simulated suites and all 26 mutants on a clean Ubuntu machine.
 
-## Honest limits
-
-* It runs **in simulation**. Nothing here has been synthesized, placed or timed on an FPGA, so 50 MHz is a
-  design target and the ~35 fps that follows from it is a projection from measured cycle counts.
-* No sound (the SoC has no audio device), no U-mode, PMP or compressed instructions.
-* DOOM is id Software's, via [doomgeneric](https://github.com/ozkl/doomgeneric); the game data is the freely
-  redistributable shareware episode. Neither is committed here — `fetch_doom.py` downloads them.
+DOOM itself is id Software's, via [doomgeneric](https://github.com/ozkl/doomgeneric), and the game data is
+the freely redistributable shareware episode; `fetch_doom.py` downloads both. There is no sound, because the
+SoC has no audio device.
 
 ## Docs
 

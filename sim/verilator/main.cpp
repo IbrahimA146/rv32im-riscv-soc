@@ -286,6 +286,10 @@ int main(int argc, char **argv) {
     std::deque<uint16_t> live_keys;        // host key events waiting to be fed in
     uint64_t frames_shown = 0;
     auto last_title = std::chrono::steady_clock::now();
+
+    // live hardware statistics: what the pipeline is doing while you play
+    struct { uint64_t cycles, instret, frames; } live = {};
+    uint32_t last_branches = 0, last_misses = 0, last_load_stall = 0, last_div_stall = 0;
     if (opt.play && !display.open(VID_WIDTH, VID_HEIGHT, opt.scale))
         return 2;
 
@@ -315,12 +319,15 @@ int main(int argc, char **argv) {
         if (!dut.rst_ni) continue;
         cycles++;
 
+        if (opt.play) live.cycles++;
+
         uart_rx.sample(dut.uart_tx_o);
         if (uart_rx.prompt_seen()) uart_tx.on_prompt();
 
         auto *root = dut.rootp;
         if (root->soc_top__DOT__u_core__DOT__wb_valid) {
             instret++;
+            live.instret++;
             if (!opt.profile.empty() && (cycles % sample_every) == 0)
                 pc_hist[root->soc_top__DOT__u_core__DOT__wb_pc]++;
             uint32_t pc   = root->soc_top__DOT__u_core__DOT__wb_pc;
@@ -355,17 +362,47 @@ int main(int argc, char **argv) {
                                 dut.rootp->soc_top__DOT__u_video__DOT__pal);
                 if (!display.poll(live_keys))
                     break;                 // window closed
-                // live frame rate in the title bar, refreshed once a second
+                // Once a second, report what the hardware is doing: the title
+                // bar gets the headline, the console gets the full picture.
                 frames_shown++;
+                live.frames++;
                 auto now = std::chrono::steady_clock::now();
                 double secs = std::chrono::duration<double>(now - last_title).count();
                 if (secs >= 1.0) {
-                    char title[160];
+                    // the CPU counts these itself, in mhpmcounter3-6
+                    auto *csr = dut.rootp;
+                    uint32_t br = csr->soc_top__DOT__u_core__DOT__u_csr__DOT__hpm3_q;
+                    uint32_t ms = csr->soc_top__DOT__u_core__DOT__u_csr__DOT__hpm4_q;
+                    uint32_t ls = csr->soc_top__DOT__u_core__DOT__u_csr__DOT__hpm5_q;
+                    uint32_t ds = csr->soc_top__DOT__u_core__DOT__u_csr__DOT__hpm6_q;
+                    uint64_t d_br = br - last_branches, d_ms = ms - last_misses;
+                    uint64_t d_ls = ls - last_load_stall, d_ds = ds - last_div_stall;
+                    last_branches = br;
+                    last_misses = ms;
+                    last_load_stall = ls;
+                    last_div_stall = ds;
+
+                    double cpi = live.instret ? double(live.cycles) / live.instret : 0;
+                    double acc = d_br ? 100.0 * (d_br - d_ms) / d_br : 0;
+                    char title[200];
                     snprintf(title, sizeof title,
-                             "DOOM on rv32im (RTL simulation) - %.1f fps, %llu cycles/frame",
-                             frames_shown / secs, (unsigned long long)frame_cycles.back());
+                             "DOOM on rv32im (RTL) - %.1f fps | CPI %.2f | branch %.1f%% | "
+                             "%llu cycles/frame",
+                             frames_shown / secs, cpi, acc,
+                             (unsigned long long)(live.frames ? live.cycles / live.frames : 0));
                     display.set_title(title);
+
+                    printf("\r%5.1f fps | %4.1f M cycles/s | %7llu cycles/frame | CPI %4.2f | "
+                           "branch %5.1f%% | stalls: load-use %4.1f%% divide %4.1f%%   ",
+                           frames_shown / secs, live.cycles / secs / 1e6,
+                           (unsigned long long)(live.frames ? live.cycles / live.frames : 0),
+                           cpi, acc,
+                           100.0 * d_ls / (live.cycles ? live.cycles : 1),
+                           100.0 * d_ds / (live.cycles ? live.cycles : 1));
+                    fflush(stdout);
+
                     frames_shown = 0;
+                    live = {};
                     last_title = now;
                 }
             }

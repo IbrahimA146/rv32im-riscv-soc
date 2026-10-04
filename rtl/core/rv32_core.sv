@@ -48,6 +48,10 @@ module rv32_core
   // ===========================================================================
   // Global pipeline control (driven further down)
   // ===========================================================================
+  // The events that cost the pipeline cycles are counted by the hardware
+  // performance counters in rv32_csr (mhpmcounter3-6), which is both how a real
+  // CPU reports them and far cheaper to read than exposing combinational
+  // signals to the simulator - doing that cost 4x simulation speed.
   logic        redirect_mem;    // trap or mret in MEM
   logic [31:0] redirect_mem_pc;
   logic        trap_take;
@@ -487,7 +491,9 @@ module rv32_core
     .irq_code_o    (irq_code),
     .instret_i     (mem_valid && !trap_take),
     .branch_i      (bpu_upd_valid),
-    .mispredict_i  (mispredict && ex_is_cf)
+    .mispredict_i  (mispredict && ex_is_cf),
+    .stall_load_i  (load_use),
+    .stall_div_i   (ex_stall)
   );
 
   assign mem_fwd_value = (mem_ctrl.wb_sel == WB_CSR) ? csr_rdata : mem_result;

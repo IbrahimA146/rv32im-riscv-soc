@@ -149,6 +149,16 @@ library has none of them.
   * A smaller viewport with low detail costs 1.8x fewer cycles per frame (1.33 M -> 0.74 M measured), which
     is the difference between a slideshow and something controllable. Both are the game's own settings and
     can be changed from its menu while playing.
+* **Watching the hardware while playing.** The CPU counts stall and flush events itself in
+  `mhpmcounter3-6` (branches, mispredictions, load-use stall cycles, divider stall cycles) and the harness
+  reads those registers once a second. The first attempt instead exposed the combinational `load_use`,
+  `ex_stall` and `mispredict` signals to the simulator with `/*verilator public*/`, which cost **4x
+  simulation speed** (7 M down to 1.8 M cycles/s): a public signal cannot be optimised away, so Verilator has
+  to materialise it every cycle. Counting in hardware is both faster to read and what a real CPU does.
+* **A second trap, worth remembering.** Left to itself DOOM compares against the clock and runs several game
+  tics per frame when rendering is slower than real time, which snowballs - more tics make the next frame
+  slower still, and the frame rate collapsed to 1.3 fps. `singletics` runs exactly one tic per frame; the
+  game then runs at whatever pace the simulation sustains, smoothly and responsively.
 * **Not done:** the browser/WebAssembly version, which was the original stretch idea. Playing locally turned
   out to be the better answer to the same question.
 

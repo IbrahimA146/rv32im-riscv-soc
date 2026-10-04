@@ -105,6 +105,8 @@ package rv32_pkg;
   localparam logic [11:0] CSR_MINSTRET  = 12'hB02;
   localparam logic [11:0] CSR_MHPMCNT3  = 12'hB03;  // resolved branches/jumps
   localparam logic [11:0] CSR_MHPMCNT4  = 12'hB04;  // branch mispredictions
+  localparam logic [11:0] CSR_MHPMCNT5  = 12'hB05;  // cycles stalled by load-use
+  localparam logic [11:0] CSR_MHPMCNT6  = 12'hB06;  // cycles stalled by the divider
   localparam logic [11:0] CSR_MCYCLEH   = 12'hB80;
   localparam logic [11:0] CSR_MINSTRETH = 12'hB82;
   localparam logic [11:0] CSR_MVENDORID = 12'hF11;

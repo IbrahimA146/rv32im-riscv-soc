@@ -123,14 +123,15 @@ ARGS_LEN = 120
 CFG_LEN = 256
 
 
-def wad_blob(wad: Path, doom_args: str, ticks_per_ms: int, blocks: int, detail: int) -> Path:
+def wad_blob(wad: Path, doom_args: str, ticks_per_ms: int, blocks: int, detail: int,
+             fixed_step: int = 0) -> Path:
     """Header (magic, size, clock rate, view settings, command line) then the WAD."""
     data = wad.read_bytes()
     args = doom_args.encode()[:ARGS_LEN - 1]
     args = args + bytes(ARGS_LEN - len(args))
     blob = BUILD / "fw/doom/wad.bin"
     blob.write_bytes(struct.pack("<IIIBBBB", WAD_MAGIC, len(data), ticks_per_ms,
-                                 blocks, detail, 0, 0) + args + data)
+                                 blocks, detail, fixed_step, 0) + args + data)
     return blob
 
 
@@ -170,7 +171,7 @@ def main() -> int:
     # travel in the header and the firmware applies them through R_SetViewSize
     blocks = args.screen_size or (PLAY_SCREEN_SIZE if args.play else 0)
     detail = int(args.low_detail) or (PLAY_LOW_DETAIL if args.play else 0)
-    blob = wad_blob(wad, args.doom_args, ticks, blocks, detail)
+    blob = wad_blob(wad, args.doom_args, ticks, blocks, detail, int(args.play))
     print(f"WAD: {wad.name} ({wad.stat().st_size / 1e6:.1f} MB)")
 
     name = "doom-play" if args.play else "doom"

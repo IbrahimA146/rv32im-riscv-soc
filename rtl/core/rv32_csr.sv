@@ -42,7 +42,9 @@ module rv32_csr
   // ---- Counter events -------------------------------------------------------
   input  logic        instret_i,
   input  logic        branch_i,
-  input  logic        mispredict_i
+  input  logic        mispredict_i,
+  input  logic        stall_load_i,
+  input  logic        stall_div_i
 );
 
   // ---------------------------------------------------------------------------
@@ -53,6 +55,7 @@ module rv32_csr
   logic [31:0] mtvec_q, mscratch_q, mepc_q, mcause_q, mtval_q;
   logic [63:0] mcycle_q, minstret_q;
   logic [31:0] hpm3_q /*verilator public_flat_rd*/, hpm4_q /*verilator public_flat_rd*/;
+  logic [31:0] hpm5_q /*verilator public_flat_rd*/, hpm6_q /*verilator public_flat_rd*/;
 
   localparam logic [31:0] MISA = 32'h4000_1100;  // RV32 + I + M
 
@@ -84,6 +87,8 @@ module rv32_csr
       CSR_MINSTRETH: rdata_o = minstret_q[63:32];
       CSR_MHPMCNT3:  rdata_o = hpm3_q;
       CSR_MHPMCNT4:  rdata_o = hpm4_q;
+      CSR_MHPMCNT5:  rdata_o = hpm5_q;
+      CSR_MHPMCNT6:  rdata_o = hpm6_q;
       CSR_MVENDORID: rdata_o = 32'b0;
       CSR_MARCHID:   rdata_o = 32'b0;
       CSR_MIMPLID:   rdata_o = 32'h0001_0000;
@@ -150,12 +155,16 @@ module rv32_csr
       minstret_q     <= 64'b0;
       hpm3_q         <= 32'b0;
       hpm4_q         <= 32'b0;
+      hpm5_q         <= 32'b0;
+      hpm6_q         <= 32'b0;
     end else begin
       // Free-running counters (a CSR write in the same cycle takes priority)
       mcycle_q <= mcycle_q + 64'd1;
       if (instret_i)    minstret_q <= minstret_q + 64'd1;
       if (branch_i)     hpm3_q     <= hpm3_q + 32'd1;
       if (mispredict_i) hpm4_q     <= hpm4_q + 32'd1;
+      if (stall_load_i) hpm5_q     <= hpm5_q + 32'd1;
+      if (stall_div_i)  hpm6_q     <= hpm6_q + 32'd1;
 
       if (trap_i) begin
         mepc_q         <= trap_pc_i;
@@ -188,6 +197,8 @@ module rv32_csr
           CSR_MINSTRETH: minstret_q <= {wval, minstret_q[31:0]};
           CSR_MHPMCNT3:  hpm3_q     <= wval;
           CSR_MHPMCNT4:  hpm4_q     <= wval;
+          CSR_MHPMCNT5:  hpm5_q     <= wval;
+          CSR_MHPMCNT6:  hpm6_q     <= wval;
           default: ;
         endcase
       end

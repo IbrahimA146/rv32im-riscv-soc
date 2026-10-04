@@ -62,7 +62,7 @@ class Halt(Exception):
 
 
 class RV32ISS:
-    CSR_RO_COUNTERS = {0xB00, 0xB02, 0xB03, 0xB04, 0xB80, 0xB82}
+    CSR_RO_COUNTERS = {0xB00, 0xB02, 0xB03, 0xB04, 0xB05, 0xB06, 0xB80, 0xB82}
 
     def __init__(self, image: bytes):
         self.mem = bytearray(RAM_SIZE)
