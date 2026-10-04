@@ -100,3 +100,4 @@ about two minutes for 400 frames — simulation runs at roughly 6 M cycles/s, ab
 * [Architecture](docs/architecture.md) — pipeline, hazards, memory map, design decisions
 * [Verification](docs/verification.md) — co-simulation, random tests, mutation testing, bugs found
 * [Plan](docs/plan.md) — the staged route to DOOM, with measurements at each step
+* [Cleanup](CLEANUP.md) — every tool installed and file downloaded to build this, and how to remove them
