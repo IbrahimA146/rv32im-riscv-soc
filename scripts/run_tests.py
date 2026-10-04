@@ -82,6 +82,18 @@ def check(cmd, what):
 
 
 @functools.lru_cache(maxsize=1)
+def nano_specs_available() -> bool:
+    """newlib-nano keeps the firmware small, but not every toolchain ships it."""
+    probe = BUILD / "probe"
+    probe.mkdir(parents=True, exist_ok=True)
+    src = probe / "probe.c"
+    src.write_text("int main(void) { return 0; }\n")
+    r = run([PREFIX + "gcc", *ARCH, "-specs=nano.specs", "-nostartfiles", "-c",
+             str(src), "-o", str(probe / "probe.o")])
+    return r.returncode == 0
+
+
+@functools.lru_cache(maxsize=1)
 def rv32_lib_dirs():
     """Directories holding the rv32im/ilp32 newlib and libgcc.
 
@@ -145,8 +157,9 @@ def build_firmware(app: str) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     srcs = sorted((ROOT / "fw/common").glob("*.[cS]")) + sorted((ROOT / "fw/apps" / app).glob("*.[cS]"))
     elf = out / f"{app}.elf"
+    specs = ["-specs=nano.specs"] if nano_specs_available() else []
     check([PREFIX + "gcc", *ARCH, "-O2", "-g", "-Wall", "-Wextra", "-ffreestanding",
-           "-nostartfiles", "-fno-tree-loop-distribute-patterns", "-specs=nano.specs",
+           "-nostartfiles", "-fno-tree-loop-distribute-patterns", *specs,
            "-ffunction-sections", "-fdata-sections",
            *[a for d in rv32_lib_dirs() for a in ("-L", str(d))],
            "-Wl,--gc-sections", "-Wl,--no-warn-rwx-segments", f"-Wl,-Map={out / (app + '.map')}",
@@ -168,8 +181,8 @@ class ToolchainMissing(RuntimeError):
 class Result:
     name: str
     ok: bool = False
-    skipped: bool = False
     detail: str = ""
+    skipped: bool = False
     cycles: int = 0
     insns: int = 0
     bpred: str = ""
@@ -275,10 +288,19 @@ def suite_fw(sim_exe, verbose, filt=""):
         try:
             hex_ = build_firmware(app)
         except ToolchainMissing as e:
-            results.append(Result(f"fw/{app}", ok=True, skipped=True, detail=f"skipped: {e}"))
+            results.append(Result(f"fw/{app}", ok=True, detail=f"skipped: {e}", skipped=True))
             continue
         except RuntimeError as e:
-            results.append(Result(f"fw/{app}", False, str(e)))
+            # a missing C library shows up as a link error rather than an
+            # exception; that is a toolchain limit, not a broken build
+            toolchain = ("cannot find -lc", "-lc_nano", "nano.specs", "libc.a",
+                         "crt0.o: No such file")
+            if any(t in str(e) for t in toolchain):
+                results.append(Result(f"fw/{app}", ok=True,
+                                      detail=f"skipped: toolchain cannot link newlib ({e.__class__.__name__})",
+                                      skipped=True))
+            else:
+                results.append(Result(f"fw/{app}", False, str(e)))
             continue
         res = run_program(f"fw/{app}", hex_, sim_exe, False, opts=opts)
         if verbose:

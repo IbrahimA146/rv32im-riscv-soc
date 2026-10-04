@@ -4,40 +4,66 @@ on:
   push:
   pull_request:
 
+# Every step also writes its output to the job summary, which is readable on
+# the run page without signing in - handy when the logs are not.
 jobs:
   verify:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      # Icarus and the RISC-V compiler are the gate: everything below the
-      # "optional" line depends on packages that may not exist on the runner,
-      # so those steps report but never fail the build.
       - name: Install required tools
         run: |
           sudo apt-get update
           sudo apt-get install -y iverilog gcc-riscv64-unknown-elf
-          iverilog -V | head -1
-          riscv64-unknown-elf-gcc --version | head -1
 
       - name: Install optional tools
         continue-on-error: true
         run: sudo apt-get install -y verilator
 
-      - name: Report what is available
+      - name: Environment
         run: |
-          echo "verilator: $(command -v verilator || echo 'not installed')"
-          echo "rv32 libc: $(riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 \
-                             -print-file-name=libc.a 2>/dev/null || echo none)"
+          {
+            echo '## Environment'
+            echo '```'
+            iverilog -V | head -1
+            riscv64-unknown-elf-gcc --version | head -1
+            echo "verilator: $(verilator --version 2>/dev/null || echo 'not installed')"
+            echo "rv32 libc: $(riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -print-file-name=libc.a)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: ISA and random tests (Icarus, co-simulated against the ISS)
-        run: python3 scripts/run_tests.py isa random -n 50 --sim=icarus
+        run: |
+          echo '## ISA + random' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          python3 scripts/run_tests.py isa random -n 50 --sim=icarus 2>&1 \
+            | tee -a "$GITHUB_STEP_SUMMARY" | tail -40
+          status=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
-      - name: Firmware (skipped automatically without an rv32 C library)
-        run: python3 scripts/run_tests.py fw --sim=icarus
+      - name: Firmware (skipped without an rv32 C library)
+        run: |
+          echo '## Firmware' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          python3 scripts/run_tests.py fw --sim=icarus 2>&1 \
+            | tee -a "$GITHUB_STEP_SUMMARY" | tail -20
+          status=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       - name: Mutation testing
-        run: python3 scripts/mutation_test.py
+        run: |
+          echo '## Mutation testing' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          python3 scripts/mutation_test.py 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" | tail -30
+          status=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       - name: Verilator lint and harness (optional)
         continue-on-error: true
