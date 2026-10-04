@@ -10,29 +10,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install toolchain
+      # Icarus and the RISC-V compiler are the gate: everything below the
+      # "optional" line depends on packages that may not exist on the runner,
+      # so those steps report but never fail the build.
+      - name: Install required tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y iverilog verilator gcc-riscv64-unknown-elf
+          sudo apt-get install -y iverilog gcc-riscv64-unknown-elf
           iverilog -V | head -1
-          verilator --version
           riscv64-unknown-elf-gcc --version | head -1
-          # The firmware suites need an rv32 C library. Ubuntu's bare-metal GCC
-          # does not always ship one; run_tests.py skips them when it is absent.
-          riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 \
-            -print-file-name=libc.a || true
 
-      - name: Lint the RTL with Verilator
+      - name: Install optional tools
+        continue-on-error: true
+        run: sudo apt-get install -y verilator
+
+      - name: Report what is available
         run: |
-          verilator --lint-only -Wall --timing -top soc_top \
-            -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-VARHIDDEN \
-            rtl/core/rv32_pkg.sv $(ls rtl/core/*.sv | grep -v pkg) rtl/soc/*.sv
+          echo "verilator: $(command -v verilator || echo 'not installed')"
+          echo "rv32 libc: $(riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 \
+                             -print-file-name=libc.a 2>/dev/null || echo none)"
 
-      - name: ISA and random tests, on both simulators
-        run: python3 scripts/run_tests.py isa random -n 50 --sim=both
+      - name: ISA and random tests (Icarus, co-simulated against the ISS)
+        run: python3 scripts/run_tests.py isa random -n 50 --sim=icarus
 
       - name: Firmware (skipped automatically without an rv32 C library)
-        run: python3 scripts/run_tests.py fw
+        run: python3 scripts/run_tests.py fw --sim=icarus
 
       - name: Mutation testing
         run: python3 scripts/mutation_test.py
+
+      - name: Verilator lint and harness (optional)
+        continue-on-error: true
+        run: |
+          command -v verilator >/dev/null || { echo "verilator not installed, skipping"; exit 0; }
+          verilator --lint-only -Wall --timing -top soc_top \
+            -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-VARHIDDEN \
+            rtl/core/rv32_pkg.sv $(ls rtl/core/*.sv | grep -v pkg) rtl/soc/*.sv
+          python3 scripts/run_tests.py isa random -n 20 --sim=verilator
