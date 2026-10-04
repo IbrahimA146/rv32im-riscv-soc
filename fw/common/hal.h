@@ -3,6 +3,7 @@
 #define HAL_H
 
 #include "soc.h"
+#include "types.h"
 
 /* ---- trap frame pushed by crt0.S trap_entry ----------------------------- */
 typedef struct {
@@ -65,12 +66,14 @@ static inline uint32_t gpio_read_out(void)    { return REG32(GPIO_OUT); }
 static inline uint32_t gpio_read_in(void)     { return REG32(GPIO_IN); }
 static inline void     gpio_set_oe(uint32_t v) { REG32(GPIO_OE) = v; }
 
-/* ---- libc subset (lib.c) ------------------------------------------------ */
-void    *memset(void *d, int c, size_t n);
-void    *memcpy(void *d, const void *s, size_t n);
-int      memcmp(const void *a, const void *b, size_t n);
-size_t   strlen(const char *s);
-int      strcmp(const char *a, const char *b);
-int      printf(const char *fmt, ...);
+/* ---- C library ----------------------------------------------------------- */
+/* newlib provides malloc/printf/qsort/string/stdio; syscalls.c wires its
+   primitives to this SoC. romfs_add() publishes a blob as a read-only file,
+   which is how the DOOM WAD is served without a block device. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void romfs_add(const char *name, const void *data, size_t size);
 
 #endif

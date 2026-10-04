@@ -2,6 +2,8 @@
 #ifndef SOC_H
 #define SOC_H
 
+#define CLK_HZ            50000000        /* mtime ticks once per cycle */
+
 #define RAM_BASE          0x00000000
 #define RAM_SIZE          0x00010000
 

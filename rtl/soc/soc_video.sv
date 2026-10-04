@@ -42,8 +42,9 @@ module soc_video #(
   localparam int PIX_AW    = $clog2((PIX_BYTES + 3) / 4);
   localparam int PIX_WORDS = 1 << PIX_AW;
 
-  logic [31:0] pix [PIX_WORDS];
-  logic [23:0] pal [256];
+  // Read out by the simulation harness when a frame is presented.
+  logic [31:0] pix [PIX_WORDS] /*verilator public_flat_rd*/;
+  logic [23:0] pal [256]       /*verilator public_flat_rd*/;
 
   localparam logic [15:0] W16 = WIDTH[15:0];
   localparam logic [15:0] H16 = HEIGHT[15:0];
@@ -54,9 +55,12 @@ module soc_video #(
   assign pix_idx = addr_i[PIX_AW+1:2];
   assign pal_idx = addr_i[9:2];
 
+  // Pixel and palette memories initialise like block RAM rather than being
+  // reset: 256 palette entries held in flip-flops would cost 6k registers.
   integer i;
   initial begin
     for (i = 0; i < PIX_WORDS; i = i + 1) pix[i] = 32'b0;
+    for (i = 0; i < 256; i = i + 1)       pal[i] = 24'(i) * 24'h01_01_01;  // grayscale ramp
   end
 
   // ---- pixel memory ---------------------------------------------------------
@@ -69,16 +73,18 @@ module soc_video #(
     end
   end
 
-  // ---- palette and control --------------------------------------------------
+  // ---- palette memory -------------------------------------------------------
+  always_ff @(posedge clk_i) begin
+    if (sel_pal_i && we_i) pal[pal_idx] <= wdata_i[23:0];
+  end
+
+  // ---- control --------------------------------------------------------------
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      // grayscale ramp: index i -> 0xiiiiii
-      for (i = 0; i < 256; i = i + 1) pal[i] <= 24'(i) * 24'h01_01_01;
       frame_count_o  <= 32'b0;
       frame_strobe_o <= 1'b0;
     end else begin
       frame_strobe_o <= 1'b0;
-      if (sel_pal_i && we_i) pal[pal_idx] <= wdata_i[23:0];
       if (sel_ctl_i && we_i && addr_i[11:0] == 12'h000) begin
         frame_strobe_o <= 1'b1;
         frame_count_o  <= frame_count_o + 32'd1;

@@ -52,7 +52,7 @@ module rv32_csr
   logic        mie_msie_q, mie_mtie_q, mie_meie_q;
   logic [31:0] mtvec_q, mscratch_q, mepc_q, mcause_q, mtval_q;
   logic [63:0] mcycle_q, minstret_q;
-  logic [31:0] hpm3_q, hpm4_q;
+  logic [31:0] hpm3_q /*verilator public_flat_rd*/, hpm4_q /*verilator public_flat_rd*/;
 
   localparam logic [31:0] MISA = 32'h4000_1100;  // RV32 + I + M
 

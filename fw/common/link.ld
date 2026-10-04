@@ -31,5 +31,8 @@ SECTIONS
     __bss_end = .;
   } > RAM
 
+  . = ALIGN(16);
+  __heap_start = .;                 /* _sbrk grows the heap from here */
+
   _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 }

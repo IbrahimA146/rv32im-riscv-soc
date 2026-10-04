@@ -19,7 +19,8 @@ module soc_ram #(
 
   localparam int AW = $clog2(WORDS);
 
-  logic [31:0] mem [WORDS];
+  // The simulation harness loads the program image straight into this array.
+  logic [31:0] mem [WORDS] /*verilator public_flat_rw*/;
 
   integer i;
   initial for (i = 0; i < WORDS; i = i + 1) mem[i] = 32'b0;

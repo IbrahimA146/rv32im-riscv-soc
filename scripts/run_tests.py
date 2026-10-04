@@ -8,10 +8,15 @@ run_tests.py - build and run the verification suites
     python scripts/run_tests.py fw -v           # firmware apps, show UART console
     python scripts/run_tests.py isa -k div      # filter by name
 
-Every ISA and random test is run twice: on the RTL (Icarus Verilog) and on the
-Python ISS. The two commit traces must match instruction-for-instruction.
+Every ISA and random test is run twice: on the RTL and on the Python ISS, and
+the two commit traces must match instruction-for-instruction.
+
+The RTL runs under either simulator: Verilator (default, several hundred times
+faster) or Icarus Verilog. --sim=both runs every test under both, which also
+checks that the two simulators agree with each other.
 """
 import argparse
+import functools
 import os
 import re
 import shutil
@@ -26,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 sys.path.insert(0, str(ROOT / "scripts"))
 import cosim  # noqa: E402
+import build_vsim  # noqa: E402
 
 # MSYS2 on Windows installs the toolchain here; harmless elsewhere.
 for extra in (r"C:\msys64\ucrt64\bin", r"C:\msys64\usr\bin"):
@@ -44,10 +50,11 @@ NO_COSIM = {"irq"}
 
 DEMO_UART_INPUT = "help,ping,stats,led,exit"
 
-# firmware apps run by the "fw" suite: name -> extra testbench plusargs
+# firmware apps run by the "fw" suite: name -> harness options
 FW_APPS = {
-    "demo":    [f"+uart_in={DEMO_UART_INPUT}"],
-    "testpat": ["+frames=build/frames/testpat_", "+keys=30,31"],
+    "demo":    {"uart_in": DEMO_UART_INPUT},
+    "testpat": {"frames": "build/frames/testpat_", "keys": "30,31"},
+    "libctest": {},
 }
 FRAME_DIR = BUILD / "frames"
 
@@ -74,10 +81,30 @@ def check(cmd, what):
     return r
 
 
+@functools.lru_cache(maxsize=1)
+def rv32_lib_dirs():
+    """Directories holding the rv32im/ilp32 newlib and libgcc.
+
+    CSR instructions need -march=rv32im_zicsr, but that arch string matches no
+    multilib name, so GCC would otherwise link the 64-bit libraries. Asking the
+    plain rv32im driver where its libraries live and putting those directories
+    first on the link line fixes it.
+    """
+    dirs = []
+    for query in ("-print-file-name=libc.a", "-print-libgcc-file-name"):
+        path = Path(run([PREFIX + "gcc", "-march=rv32im", "-mabi=ilp32", query]).stdout.strip())
+        if path.is_file():
+            dirs.append(path.parent)
+    return tuple(dirs)
+
+
 # ---------------------------------------------------------------------------
 # Build steps
 # ---------------------------------------------------------------------------
-def compile_rtl() -> Path:
+def compile_sim(sim: str) -> Path:
+    """Build the chosen RTL simulator and return its executable."""
+    if sim == "verilator":
+        return build_vsim.build("soc", 16384, 320, 200, 8, os.cpu_count() or 4)
     vvp = BUILD / "sim" / "tb_soc.vvp"
     vvp.parent.mkdir(parents=True, exist_ok=True)
     newest = max(p.stat().st_mtime for p in RTL_SOURCES)
@@ -114,8 +141,10 @@ def build_firmware(app: str) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     srcs = sorted((ROOT / "fw/common").glob("*.[cS]")) + sorted((ROOT / "fw/apps" / app).glob("*.[cS]"))
     elf = out / f"{app}.elf"
-    check([PREFIX + "gcc", *ARCH, "-O2", "-g", "-Wall", "-Wextra", "-ffreestanding", "-nostdlib",
-           "-nostartfiles", "-fno-builtin", "-fno-tree-loop-distribute-patterns", "-ffunction-sections", "-fdata-sections",
+    check([PREFIX + "gcc", *ARCH, "-O2", "-g", "-Wall", "-Wextra", "-ffreestanding",
+           "-nostartfiles", "-fno-tree-loop-distribute-patterns", "-specs=nano.specs",
+           "-ffunction-sections", "-fdata-sections",
+           *[a for d in rv32_lib_dirs() for a in ("-L", str(d))],
            "-Wl,--gc-sections", "-Wl,--no-warn-rwx-segments", f"-Wl,-Map={out / (app + '.map')}",
            "-I", ROOT / "fw/common", "-T", ROOT / "fw/common/link.ld", *srcs, "-o", elf],
           f"build firmware {app}")
@@ -139,14 +168,19 @@ class Result:
     console: str = field(default="", repr=False)
 
 
-def run_rtl(vvp: Path, hex_: Path, trace: Path = None, uart_in: str = None, timeout=3_000_000,
-            extra=()):
-    args = ["vvp", "-n", vvp, f"+hex={hex_}", f"+timeout={timeout}"]
-    if trace:
-        args.append(f"+trace={trace}")
-    if uart_in:
-        args.append(f"+uart_in={uart_in}")
-    args += list(extra)
+def run_rtl(sim_exe: Path, hex_: Path, trace: Path = None, timeout=3_000_000, opts=None):
+    """Run one image on the RTL. opts keys: uart_in, frames, keys."""
+    opts = opts or {}
+    if sim_exe.suffix == ".vvp":
+        args = ["vvp", "-n", sim_exe, f"+hex={hex_}", f"+timeout={timeout}"]
+        if trace:
+            args.append(f"+trace={trace}")
+        args += [f"+{k}={v}" for k, v in opts.items()]
+    else:
+        args = [sim_exe, f"--hex={hex_}", f"--timeout={timeout}", "--quiet"]
+        if trace:
+            args.append(f"--trace={trace}")
+        args += [f"--{k.replace('_', '-')}={v}" for k, v in opts.items()]
     r = run(args, cwd=ROOT)
     out = "\n".join(l for l in r.stdout.splitlines() if "$readmemh" not in l and "$finish" not in l)
     return out
@@ -161,12 +195,15 @@ def parse_stats(out: str, res: Result):
     res.bpred = m.group(1) if m else ""
 
 
-def run_program(name: str, hex_: Path, vvp: Path, do_cosim: bool, uart_in=None,
-                timeout=3_000_000, extra=()) -> Result:
+def run_program(name: str, hex_: Path, sim_exe: Path, do_cosim: bool, uart_in=None,
+                timeout=3_000_000, opts=None) -> Result:
     res = Result(name)
     t0 = time.time()
+    opts = dict(opts or {})
+    if uart_in:
+        opts["uart_in"] = uart_in
     rtl_trace = hex_.with_suffix(".rtl.trace") if do_cosim else None
-    out = run_rtl(vvp, hex_, rtl_trace, uart_in, timeout, extra)
+    out = run_rtl(sim_exe, hex_, rtl_trace, timeout, opts)
     res.console = out
     parse_stats(out, res)
     if "*** PASS ***" not in out:
@@ -186,7 +223,7 @@ def run_program(name: str, hex_: Path, vvp: Path, do_cosim: bool, uart_in=None,
 # ---------------------------------------------------------------------------
 # Suites
 # ---------------------------------------------------------------------------
-def suite_isa(vvp, pool, filt):
+def suite_isa(sim_exe, pool, filt):
     subprocess.run([sys.executable, ROOT / "tests/isa/gen_isa_tests.py"], capture_output=True)
     srcs = sorted((ROOT / "tests/isa").glob("*.S")) + sorted((ROOT / "tests/isa/generated").glob("*.S"))
     srcs = [s for s in srcs if not filt or filt in s.stem]
@@ -196,12 +233,12 @@ def suite_isa(vvp, pool, filt):
             hex_ = build_asm(src, BUILD / "isa")
         except RuntimeError as e:
             return Result(f"isa/{src.stem}", False, str(e))
-        return run_program(f"isa/{src.stem}", hex_, vvp, src.stem not in NO_COSIM)
+        return run_program(f"isa/{src.stem}", hex_, sim_exe, src.stem not in NO_COSIM)
 
     return list(pool.map(job, srcs))
 
 
-def suite_random(vvp, pool, n, seed0, filt):
+def suite_random(sim_exe, pool, n, seed0, filt):
     out = BUILD / "random"
     out.mkdir(parents=True, exist_ok=True)
 
@@ -214,16 +251,16 @@ def suite_random(vvp, pool, n, seed0, filt):
             hex_ = build_asm(src, out)
         except RuntimeError as e:
             return Result(name, False, str(e))
-        return run_program(name, hex_, vvp, True)
+        return run_program(name, hex_, sim_exe, True)
 
     seeds = [s for s in range(seed0, seed0 + n) if not filt or filt in str(s)]
     return list(pool.map(job, seeds))
 
 
-def suite_fw(vvp, verbose, filt=""):
+def suite_fw(sim_exe, verbose, filt=""):
     results = []
     FRAME_DIR.mkdir(parents=True, exist_ok=True)
-    for app, extra in FW_APPS.items():
+    for app, opts in FW_APPS.items():
         if filt and filt not in app:
             continue
         try:
@@ -231,7 +268,7 @@ def suite_fw(vvp, verbose, filt=""):
         except RuntimeError as e:
             results.append(Result(f"fw/{app}", False, str(e)))
             continue
-        res = run_program(f"fw/{app}", hex_, vvp, False, extra=extra)
+        res = run_program(f"fw/{app}", hex_, sim_exe, False, opts=opts)
         if verbose:
             print(res.console)
         # turn any captured frames into PNGs and say where they went
@@ -252,6 +289,8 @@ def main() -> int:
     ap.add_argument("-k", "--filter", default="")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("-v", "--verbose", action="store_true", help="print firmware UART console")
+    ap.add_argument("--sim", default="verilator", choices=["verilator", "icarus", "both"],
+                    help="which RTL simulator to run the tests on (default: verilator)")
     args = ap.parse_args()
     args.suites = args.suites or ["isa", "random", "fw"]
     for s in args.suites:
@@ -259,15 +298,21 @@ def main() -> int:
             ap.error(f"unknown suite '{s}'")
 
     t0 = time.time()
-    vvp = compile_rtl()
     results = []
-    with ThreadPoolExecutor(args.jobs) as pool:
-        if "isa" in args.suites:
-            results += suite_isa(vvp, pool, args.filter)
-        if "random" in args.suites:
-            results += suite_random(vvp, pool, args.num_random, args.seed, args.filter)
-    if "fw" in args.suites:
-        results += suite_fw(vvp, args.verbose, args.filter)
+    for sim in (["verilator", "icarus"] if args.sim == "both" else [args.sim]):
+        sim_exe = compile_sim(sim)
+        tag = f"[{sim[:3]}] " if args.sim == "both" else ""
+        sim_results = []
+        with ThreadPoolExecutor(args.jobs) as pool:
+            if "isa" in args.suites:
+                sim_results += suite_isa(sim_exe, pool, args.filter)
+            if "random" in args.suites:
+                sim_results += suite_random(sim_exe, pool, args.num_random, args.seed, args.filter)
+        if "fw" in args.suites:
+            sim_results += suite_fw(sim_exe, args.verbose, args.filter)
+        for r in sim_results:
+            r.name = tag + r.name
+        results += sim_results
 
     w = max((len(r.name) for r in results), default=10)
     print(f"\n{'TEST':<{w}}  {'RESULT':<6}  {'INSNS':>8}  {'CPI':>5}  {'BPRED':>6}  DETAIL")

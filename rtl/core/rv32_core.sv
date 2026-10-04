@@ -122,10 +122,10 @@ module rv32_core
   );
 
   // WB write port (driven in WB section)
-  logic        wb_valid;
-  logic        wb_reg_we;
-  logic [4:0]  wb_rd;
-  logic [31:0] wb_value;
+  logic        wb_valid  /*verilator public_flat_rd*/;
+  logic        wb_reg_we /*verilator public_flat_rd*/;
+  logic [4:0]  wb_rd     /*verilator public_flat_rd*/;
+  logic [31:0] wb_value  /*verilator public_flat_rd*/;
 
   rv32_regfile u_regfile (
     .clk_i    (clk_i),
@@ -493,10 +493,11 @@ module rv32_core
   assign mem_fwd_value = (mem_ctrl.wb_sel == WB_CSR) ? csr_rdata : mem_result;
 
   // MEM/WB register (plus commit-trace fields used by the testbench)
-  logic [31:0] wb_pc, wb_insn;
-  logic        wb_mem_we;
-  logic [31:0] wb_mem_addr, wb_mem_wdata;
-  logic [1:0]  wb_mem_size;
+  // Exposed to the simulation harness so it can emit the commit trace.
+  logic [31:0] wb_pc /*verilator public_flat_rd*/, wb_insn /*verilator public_flat_rd*/;
+  logic        wb_mem_we /*verilator public_flat_rd*/;
+  logic [31:0] wb_mem_addr /*verilator public_flat_rd*/, wb_mem_wdata /*verilator public_flat_rd*/;
+  logic [1:0]  wb_mem_size /*verilator public_flat_rd*/;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
