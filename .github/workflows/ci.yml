@@ -44,7 +44,11 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
-      - name: Firmware (skipped without an rv32 C library)
+      # Informational: the firmware needs an rv32 newlib, and how to link one
+      # differs between toolchains. The CPU itself is verified by the steps
+      # above and below, which need no C library at all.
+      - name: Firmware (informational - needs an rv32 C library)
+        continue-on-error: true
         run: |
           echo '## Firmware' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
