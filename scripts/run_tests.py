@@ -342,7 +342,9 @@ def main() -> int:
     print(f"{passed}/{total} passed"
           + (f", {skipped} skipped" if skipped else "")
           + f", {total_insns:,} instructions verified in {time.time() - t0:.1f}s")
-    return 0 if passed == len(results) else 1
+    # skipped tests are not failures: a toolchain without an rv32 C library can
+    # still run everything that does not need one
+    return 0 if all(r.ok for r in results) else 1
 
 
 if __name__ == "__main__":
