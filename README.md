@@ -4,6 +4,8 @@
 
 ![DOOM running on the CPU](docs/images/doom.gif)
 
+<sub>Higher quality recording: [docs/video/doom-400-frames.mp4](docs/video/doom-400-frames.mp4) — 400 frames captured from the framebuffer.</sub>
+
 I designed a RISC-V processor from scratch in SystemVerilog, built a small computer around it, and DOOM runs
 on it — playable, with a keyboard. Every pixel above was produced by the pipeline in [`rtl/`](rtl/)
 executing compiled C. No emulator stands in for the CPU.
