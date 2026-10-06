@@ -42,6 +42,7 @@ def sdl_available() -> bool:
 def build(name: str, ram_words: int, width: int, height: int, uart_div: int, jobs: int,
           sdl: bool = False, fast: bool = False, threads: int = 0) -> Path:
     outdir = BUILD / f"vsim-{name}"
+    outdir.mkdir(parents=True, exist_ok=True)   # verilator will not create it
     exe = outdir / ("vsim.exe" if os.name == "nt" else "vsim")
     defines = f"-DRAM_WORDS={ram_words} -DVID_WIDTH={width} -DVID_HEIGHT={height}"
     ldflags = []
