@@ -4,7 +4,13 @@ A complete record, so the laptop can be returned to its previous state after the
 repository is pushed. Nothing here is needed to *read* the code on GitHub — only
 to build and run it.
 
-Last updated: 2026-10-04 (SDL2 added for interactive play)
+Last updated: 2026-10-06
+
+> **Status: this has been done.** The desktop working copy and all nine packages
+> below were removed on 2026-10-06. The repository is the only thing that
+> remains, at https://github.com/IbrahimA146/rv32im-riscv-soc. To work on it
+> again, clone it and reinstall the tools with the single `pacman -S` command in
+> the README.
 
 ---
 
@@ -62,12 +68,29 @@ project folder, so deleting the project does not remove them.
 
 Roughly **1.2 GB** in total.
 
+### The exact list
+
+Taken from `/var/log/pacman.log`, which records everything installed on this
+machine and when. These nine, and nothing else, were added for this project:
+
+| Installed | Package |
+|---|---|
+| 2026-09-17 | `mingw-w64-ucrt-x86_64-iverilog` |
+| 2026-09-17 | `mingw-w64-ucrt-x86_64-riscv64-unknown-elf-binutils` |
+| 2026-09-17 | `mingw-w64-ucrt-x86_64-riscv64-unknown-elf-newlib` |
+| 2026-09-17 | `mingw-w64-ucrt-x86_64-riscv64-unknown-elf-gcc` |
+| 2026-09-17 | `make` |
+| 2026-10-01 | `mingw-w64-ucrt-x86_64-verilator` |
+| 2026-10-01 | `perl-Pod-Parser` |
+| 2026-10-03 | `mingw-w64-ucrt-x86_64-vulkan-loader` (pulled in by SDL2) |
+| 2026-10-03 | `mingw-w64-ucrt-x86_64-SDL2` |
+
 ### Removing them
 
 Open **MSYS2 UCRT64** from the Start menu and run:
 
 ```bash
-pacman -R mingw-w64-ucrt-x86_64-verilator mingw-w64-ucrt-x86_64-iverilog mingw-w64-ucrt-x86_64-riscv64-unknown-elf-gcc mingw-w64-ucrt-x86_64-riscv64-unknown-elf-newlib mingw-w64-ucrt-x86_64-riscv64-unknown-elf-binutils mingw-w64-ucrt-x86_64-SDL2 make perl-Pod-Parser
+pacman -R mingw-w64-ucrt-x86_64-verilator mingw-w64-ucrt-x86_64-iverilog mingw-w64-ucrt-x86_64-riscv64-unknown-elf-gcc mingw-w64-ucrt-x86_64-riscv64-unknown-elf-newlib mingw-w64-ucrt-x86_64-riscv64-unknown-elf-binutils mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-vulkan-loader make perl-Pod-Parser
 ```
 
 Two cautions:
